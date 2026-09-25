@@ -42,7 +42,11 @@ export function waveFrame(real, imag, n = 256) {
 export class SynthEngine {
   constructor() {
     this.ctx = null;
-    this.voices = new Map(); // string -> {osc, gain, midi}
+    // Voices keyed by an opaque id: 's<n>' per string in multi-channel
+    // mode (monophonic per string, like a real guitar), 'n<midi>' per
+    // note in single-channel mode (polyphonic, since the device does
+    // not tell us which string sounded).
+    this.voices = new Map();
     this.stringGain = 0.28;
     this.waves = null;
   }
@@ -71,9 +75,9 @@ export class SynthEngine {
     return vel > 96 ? this.waves.bright : vel > 56 ? this.waves.mid : this.waves.mellow;
   }
 
-  noteOn(str, midi, vel = 100) {
+  noteOn(key, midi, vel = 100) {
     if (!this.ensure()) return;
-    this.noteOff(str, null, 0.03); // monophonic per string
+    this.noteOff(key, null, 0.03); // retrigger: release the old voice
     const t = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     osc.setPeriodicWave(this.waveFor(vel));
@@ -85,24 +89,28 @@ export class SynthEngine {
     g.gain.setTargetAtTime(peak * 0.55, t + 0.02, 0.9); // long pluck tail
     osc.connect(g).connect(this.master);
     osc.start(t);
-    this.voices.set(str, { osc, gain: g, midi });
+    this.voices.set(key, { osc, gain: g, midi });
   }
 
-  noteOff(str, midi = null, release = 0.12) {
-    const v = this.voices.get(str);
+  noteOff(key, midi = null, release = 0.12) {
+    const v = this.voices.get(key);
     if (!v) return;
     if (midi !== null && v.midi !== midi) return; // stale off
     const t = this.ctx.currentTime;
     v.gain.gain.cancelScheduledValues(t);
     v.gain.gain.setTargetAtTime(0.0001, t, release / 3);
     v.osc.stop(t + release * 4);
-    this.voices.delete(str);
+    this.voices.delete(key);
   }
 
-  bend(str, semis) {
-    const v = this.voices.get(str);
+  bend(key, semis) {
+    const v = this.voices.get(key);
     if (!v) return;
     v.osc.detune.setTargetAtTime(semis * 100, this.ctx.currentTime, 0.01);
+  }
+
+  bendAll(semis) {
+    for (const key of this.voices.keys()) this.bend(key, semis);
   }
 
   allOff() { for (const s of [...this.voices.keys()]) this.noteOff(s, null, 0.05); }

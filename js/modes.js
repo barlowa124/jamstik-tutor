@@ -36,7 +36,9 @@ export class FreePlay {
   refresh() {
     const midis = [...this.app.held.values()].map(n => n.midi);
     this.notes.textContent = midis.length
-      ? [...this.app.held.entries()].map(([s, n]) => `${STRING_NAMES[s]}:${midiName(n.midi)}`).join('  ')
+      ? [...this.app.held.values()]
+          .map(n => `${STRING_NAMES[n.str]}${n.inferred ? '?' : ''}:${midiName(n.midi)}`)
+          .join('  ')
       : '';
     if (!midis.length) {
       this.readout.textContent = 'no notes held';
@@ -150,16 +152,22 @@ export class ChordTrainer {
     const parsed = chordFromLabel(this.cur);
     const gap = chordGap(parsed.root, parsed.suffix, midis);
     const shape = CHORD_SHAPES[this.cur];
+    const heldArr = [...this.app.held.values()];
+    // Single-channel MIDI does not name the string; per-string coaching
+    // would compare against inferred positions, so skip it then.
+    const stringsKnown = heldArr.every(n => !n.inferred);
     const perString = [];
-    for (const [s, f] of Object.entries(shape)) {
-      const held = this.app.held.get(+s);
-      if (f === null) {
-        if (held) perString.push(`${STRING_NAMES[s]} string should be muted — heard ${midiName(held.midi)}`);
-      } else if (!held) {
-        perString.push(`${STRING_NAMES[s]} string silent — expected fret ${f}`);
-      } else {
-        const heard = held.midi - OPEN_MIDI[s];
-        if (heard !== f) perString.push(`${STRING_NAMES[s]} fret ${heard} — expected ${f}`);
+    if (stringsKnown) {
+      for (const [s, f] of Object.entries(shape)) {
+        const held = heldArr.find(n => n.str === +s);
+        if (f === null) {
+          if (held) perString.push(`${STRING_NAMES[s]} string should be muted — heard ${midiName(held.midi)}`);
+        } else if (!held) {
+          perString.push(`${STRING_NAMES[s]} string silent — expected fret ${f}`);
+        } else {
+          const heard = held.midi - OPEN_MIDI[s];
+          if (heard !== f) perString.push(`${STRING_NAMES[s]} fret ${heard} — expected ${f}`);
+        }
       }
     }
     this.score.tries++;

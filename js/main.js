@@ -1,6 +1,6 @@
 // App wiring: state, mode dispatch, render loop, device management.
 
-import { OPEN_MIDI, midiName } from './theory.js';
+import { OPEN_MIDI, midiName, inferString } from './theory.js';
 import { MidiEngine, VirtualJamstik } from './midi.js';
 import { SynthEngine, RealInput, Metronome } from './audio.js';
 import { Fretboard } from './fretboard.js';
@@ -19,29 +19,56 @@ const app = {
 };
 
 // ── MIDI handlers ───────────────────────────────────────────────────────
+// key: voice key ('s<n>' per string, 'n<midi>' per note). str is null
+// when the device sends single-channel MIDI — string is then inferred
+// from pitch for display and flagged `inferred` (weaker coaching).
 const handlers = {
-  onNoteOn(str, midi, vel) {
-    app.held.set(str, { midi, vel, bend: 0 });
-    app.synth.noteOn(str, midi, vel);
+  onNoteOn(key, str, midi, vel) {
+    let inferred = false;
+    if (str == null) {
+      const taken = new Set([...app.held.values()].map(n => n.str));
+      const pos = inferString(midi, taken);
+      if (!pos) { logMidi(`on  ${midiName(midi)} (out of range)`); return; }
+      str = pos.string;
+      inferred = true;
+    }
+    app.held.set(key, { str, midi, vel, bend: 0, inferred });
+    app.synth.noteOn(key, midi, vel);
     app.fretboard.active.set(str, { midi, bend: 0 });
     app.mode?.onNoteOn?.(str, midi);
     app.mode?.onNotesChange?.();
-    logMidi(`on  s${str} ${midiName(midi)} v${vel}`);
+    logMidi(`on  s${str}${inferred ? '?' : ''} ${midiName(midi)} v${vel}`);
   },
-  onNoteOff(str, midi) {
-    app.held.delete(str);
-    app.synth.noteOff(str, midi);
-    app.fretboard.active.delete(str);
-    app.mode?.onNoteOff?.(str, midi);
+  onNoteOff(key, str, midi) {
+    // Auto mode can upgrade mid-strum: a note that arrived as 'n<midi>'
+    // releases as 's<str>' once per-string mode resolves. Fall back to
+    // matching by pitch so the off always finds its voice.
+    let k = key;
+    if (!app.held.has(k)) {
+      const hit = [...app.held.entries()].find(([, v]) => v.midi === midi);
+      if (hit) k = hit[0];
+    }
+    const n = app.held.get(k);
+    if (n) app.fretboard.active.delete(n.str);
+    app.held.delete(k);
+    app.synth.noteOff(k, midi);
+    app.mode?.onNoteOff?.(n?.str ?? str, midi);
     app.mode?.onNotesChange?.();
-    logMidi(`off s${str} ${midiName(midi)}`);
+    logMidi(`off s${n?.str ?? str ?? '?'} ${midiName(midi)}`);
   },
   onPitchBend(str, semis) {
-    const n = app.held.get(str);
-    if (n) n.bend = semis;
+    if (str == null) {
+      app.synth.bendAll(semis);
+      for (const n of app.held.values()) n.bend = semis;
+      for (const f of app.fretboard.active.values()) f.bend = semis;
+      logMidi(`bend all ${semis >= 0 ? '+' : ''}${semis.toFixed(2)}`);
+      return;
+    }
+    const hit = [...app.held.entries()].find(([, v]) => v.str === str);
+    if (hit) hit[1].bend = semis;
     const f = app.fretboard.active.get(str);
     if (f) f.bend = semis;
-    app.synth.bend(str, semis);
+    app.synth.bend(hit ? hit[0] : `s${str}`, semis);
     logMidi(`bend s${str} ${semis >= 0 ? '+' : ''}${semis.toFixed(2)}`);
   },
   onStateChange(text) { $('status').textContent = text; },
@@ -67,6 +94,7 @@ async function connectSource() {
     const eng = new MidiEngine(handlers);
     eng.flip = $('flip').checked;
     eng.bendRangeSemis = +$('bend-range').value;
+    eng.chanMode = $('chan-mode').value;
     app.source = eng;
     const ok = await eng.connect(sel.value === 'auto' ? null : sel.value);
     if (ok) fillDeviceList(eng.listInputs());
@@ -189,6 +217,12 @@ function init() {
 
   $('connect').onclick = connectSource;
   $('flip').onchange = () => { if (app.source instanceof MidiEngine) app.source.flip = $('flip').checked; };
+  $('chan-mode').onchange = () => {
+    if (app.source instanceof MidiEngine) {
+      app.source.chanMode = $('chan-mode').value;
+      app.source.seenCh.clear();
+    }
+  };
   $('bend-range').onchange = () => { if (app.source instanceof MidiEngine) app.source.bendRangeSemis = +$('bend-range').value; };
   $('board').addEventListener('pointerdown', boardClick);
   for (const b of document.querySelectorAll('.mode-tab')) {
@@ -226,6 +260,11 @@ function init() {
   };
 
   requestAnimationFrame(frame);
+
+  // Debug/test hook: inspect app state and inject events from devtools,
+  // e.g. __jt.handlers.onNoteOn('n64', null, 64, 100) simulates a
+  // single-channel (mono) device sending middle C.
+  window.__jt = { app, handlers };
 }
 
 init();

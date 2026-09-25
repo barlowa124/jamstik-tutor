@@ -16,6 +16,19 @@ export const FRET_COUNT = 15;
 
 export const fretFor = (stringNum, midi) => midi - OPEN_MIDI[stringNum];
 
+// When the device sends single-channel MIDI it does not name the string.
+// Infer the lowest-fret position that produces this pitch on a free string.
+export function inferString(midi, taken = new Set()) {
+  let best = null;
+  for (let s = 1; s <= 6; s++) {
+    if (taken.has(s)) continue;
+    const f = midi - OPEN_MIDI[s];
+    if (f < 0 || f > FRET_COUNT) continue;
+    if (best === null || f < best.fret) best = { string: s, fret: f };
+  }
+  return best;
+}
+
 // Chord qualities as interval patterns (semitones from root).
 // Ordered so richer qualities win ties in detection.
 const CHORD_PATTERNS = [

@@ -26,10 +26,24 @@ BLE MIDI: pair the guitar first in *Audio MIDI Setup → MIDI Studio →
 Bluetooth Configuration*. Once macOS exposes it as a CoreMIDI device,
 the browser sees it too.
 
-The app assumes Jamstik multi-channel mode: string 1 (high e) on MIDI
-channel 1 through string 6 (low E) on channel 6. If your unit sends
-low-to-high, tick **flip strings**. Pitch bend defaults to ±2 semitones.
-Set ±4/±12/±24 to match your Jamstik app's bend range.
+Channel handling is automatic by default (`ch: auto`):
+
+- **Multi-channel mode** (Jamstik Creator's default: string 1 = channel 1
+  through string 6 = channel 6) gives exact string/fret display and
+  per-string coaching. If your unit maps low-to-high, tick
+  **flip strings**.
+- **Single-channel mode** (all strings on channel 1) used to collapse
+  everything into one sounding note. The app now detects it, becomes
+  polyphonic, and infers fret positions from pitch (marked `?` in the
+  held-notes readout). Chord verdicts still work, while per-string
+  coaching is skipped because the device does not say which string
+  sounded.
+- **MPE mode** (notes spread across channels) plays polyphonically with
+  inferred positions.
+
+Force a mode with the **ch** selector if auto-detection misfires.
+Pitch bend defaults to ±2 semitones. Set ±4/±12/±24 to match your
+Jamstik app's bend range.
 
 **Virtual Jamstik (demo)**: connect with no hardware. The demo panel
 strums common chords, runs an A-minor-pentatonic scale, and does a bend
