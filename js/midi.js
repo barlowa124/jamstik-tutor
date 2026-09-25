@@ -88,8 +88,10 @@ export class MidiEngine {
       const v14 = ((d2 << 7) | d1) - 8192;
       // Single-channel bend is global; multi-channel bend is per string.
       this.h.onPitchBend?.(multi ? str : null, (v14 / 8192) * this.bendRangeSemis, t);
+    } else if (type === CC && (d1 === 123 || d1 === 120)) {
+      this.h.onAllOff?.(); // all notes off / all sound off
     }
-    // CCs (sustain, Jamstik-specific config) are ignored for now.
+    // Other CCs (sustain, Jamstik-specific config) are ignored for now.
   }
 
   disconnect() {

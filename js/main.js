@@ -26,8 +26,8 @@ const app = {
 // when the device sends single-channel MIDI — string is then inferred
 // from pitch for display and flagged `inferred` (weaker coaching).
 const handlers = {
-  onNoteOn(key, str, midi, vel) {
-    midi += app.transpose;
+  onNoteOn(key, str, rawMidi, vel) {
+    const midi = rawMidi + app.transpose;
     let inferred = false;
     if (str == null) {
       const taken = new Set([...app.held.values()].map(n => n.str));
@@ -36,30 +36,38 @@ const handlers = {
       str = pos.string;
       inferred = true;
     }
-    app.held.set(key, { str, midi, vel, bend: 0, inferred });
+    app.held.set(key, { str, midi, rawMidi, vel, bend: 0, inferred });
     app.synth.noteOn(key, midi, vel, str);
     app.fretboard.active.set(str, { midi, bend: 0 });
     app.mode?.onNoteOn?.(str, midi);
     app.mode?.onNotesChange?.();
     logMidi(`on  s${str}${inferred ? '?' : ''} ${midiName(midi)} v${vel}`);
   },
-  onNoteOff(key, str, midi) {
-    midi += app.transpose;
-    // Auto mode can upgrade mid-strum: a note that arrived as 'n<midi>'
-    // releases as 's<str>' once per-string mode resolves. Fall back to
-    // matching by pitch so the off always finds its voice.
+  onNoteOff(key, str, rawMidi) {
+    // Match on the RAW midi so a transpose change mid-hold can't orphan
+    // the voice. If the key matches but the raw pitch differs, the off is
+    // a stale release for a note that was already re-picked — ignore it.
     let k = key;
-    if (!app.held.has(k)) {
-      const hit = [...app.held.entries()].find(([, v]) => v.midi === midi);
-      if (hit) k = hit[0];
+    let n = app.held.get(k);
+    if (n && n.rawMidi !== rawMidi) return;
+    if (!n) {
+      const hit = [...app.held.entries()].find(([, v]) => v.rawMidi === rawMidi);
+      if (hit) { k = hit[0]; n = hit[1]; }
     }
-    const n = app.held.get(k);
-    if (n) app.fretboard.active.delete(n.str);
+    if (!n) return;
+    app.fretboard.active.delete(n.str);
     app.held.delete(k);
-    app.synth.noteOff(k, midi);
-    app.mode?.onNoteOff?.(n?.str ?? str, midi);
+    app.synth.noteOff(k, n.midi); // stored pitch -> the guard always passes
+    app.mode?.onNoteOff?.(n.str ?? str, n.midi);
     app.mode?.onNotesChange?.();
-    logMidi(`off s${n?.str ?? str ?? '?'} ${midiName(midi)}`);
+    logMidi(`off s${n.str} ${midiName(n.midi)}`);
+  },
+  onAllOff() {
+    app.held.clear();
+    app.fretboard.active.clear();
+    app.synth.allOff();
+    app.mode?.onNotesChange?.();
+    logMidi('all notes off');
   },
   onPitchBend(str, semis) {
     if (str == null) {
@@ -323,6 +331,8 @@ function init() {
   for (const b of document.querySelectorAll('.mode-tab')) {
     b.onclick = () => setMode(b.dataset.mode);
   }
+
+  $('panic').onclick = () => handlers.onAllOff();
 
   $('real-in').onclick = async () => {
     try {
