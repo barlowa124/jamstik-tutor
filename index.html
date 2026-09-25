@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jamstik Tutor</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header>
+  <span class="logo">Jamstik Tutor</span>
+  <select id="device"></select>
+  <button id="connect">connect</button>
+  <span id="status" class="status">idle</span>
+  <nav>
+    <button class="mode-tab active" data-mode="free">free play</button>
+    <button class="mode-tab" data-mode="chords">chord trainer</button>
+    <button class="mode-tab" data-mode="scales">scale drills</button>
+  </nav>
+  <span class="spacer"></span>
+  <label class="opt"><input type="checkbox" id="flip"> flip strings</label>
+  <label class="opt">bend ±
+    <select id="bend-range">
+      <option>2</option><option>4</option><option>12</option><option>24</option>
+    </select>
+  </label>
+  <button id="real-in">enable audio in</button>
+  <input id="bpm" type="number" value="80" min="40" max="220">
+  <button id="metro">▶ metronome</button>
+  <span id="metro-led"></span>
+</header>
+
+<main>
+  <section id="board-col">
+    <canvas id="board"></canvas>
+    <div id="midi-log"></div>
+  </section>
+  <aside id="side">
+    <div id="mode-panel"></div>
+    <div id="demo-panel" style="display:none"></div>
+  </aside>
+</main>
+
+<footer>
+  <div class="viz-cell"><h3>waveform</h3><canvas id="scope"></canvas></div>
+  <div class="viz-cell"><h3>spectrum</h3><canvas id="spectrum"></canvas></div>
+  <div class="viz-cell"><h3>spectrogram</h3><canvas id="spectrogram"></canvas></div>
+  <div class="viz-cell"><h3>wavetable</h3><canvas id="wavetable"></canvas></div>
+</footer>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
