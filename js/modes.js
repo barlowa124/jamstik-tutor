@@ -2,7 +2,7 @@
 // prompts + verdict coaching), ScaleDrill (in-key feedback + ordered runs).
 
 import {
-  CHORD_SHAPES, chordFromLabel, chordGap, detectChord,
+  CHORD_SHAPES, chordFromLabel, chordGap, detectChord, currentTuningName,
   midiName, OPEN_MIDI, SCALES, scalePositions, scaleRun, STRING_NAMES,
 } from './theory.js';
 
@@ -55,6 +55,9 @@ export class FreePlay {
 export class ChordTrainer {
   constructor(app) { this.app = app; }
   activate(panel) {
+    // Open-shape fingerings are standard-tuning-specific; in other
+    // tunings we keep pitch-class verdicts but hide the shape overlay.
+    this.standardTuning = currentTuningName() === 'standard';
     this.score = { tries: 0, hits: 0, streak: 0, latencies: [] };
     this.progression = ['C maj', 'G maj', 'A min', 'F maj'];
     this.ix = 0;
@@ -82,6 +85,11 @@ export class ChordTrainer {
     row.append(prog, sel, hear, skip);
     panel.append(row);
 
+    if (!this.standardTuning) {
+      panel.append(el('div', 'hint',
+        `Tuning is ${currentTuningName()} — shape diagrams assume standard; ` +
+        `verdicts still check chord tones.`));
+    }
     this.target = el('div', 'big-readout', '');
     this.verdict = el('div', 'verdict', '');
     this.stats = el('div', 'stats', '');
@@ -111,15 +119,15 @@ export class ChordTrainer {
       if (f === null) continue;
       const delay = (6 - +s) * 25;
       const midi = OPEN_MIDI[s] + f;
-      setTimeout(() => this.app.synth.noteOn(+s, midi, 92), delay);
-      setTimeout(() => this.app.synth.noteOff(+s, midi), delay + 1800);
+      setTimeout(() => this.app.synth.noteOn(`s${s}`, midi, 92, +s), delay);
+      setTimeout(() => this.app.synth.noteOff(`s${s}`, midi), delay + 1800);
     }
   }
 
   show(label) {
     this.cur = label;
     const shape = CHORD_SHAPES[label];
-    this.app.fretboard.targets = shape;
+    this.app.fretboard.targets = this.standardTuning ? shape : null;
     this.target.textContent = label;
     this.target.style.color = '#fbbf24';
     this.verdict.textContent = 'strum the shape shown';
@@ -155,7 +163,7 @@ export class ChordTrainer {
     const heldArr = [...this.app.held.values()];
     // Single-channel MIDI does not name the string; per-string coaching
     // would compare against inferred positions, so skip it then.
-    const stringsKnown = heldArr.every(n => !n.inferred);
+    const stringsKnown = this.standardTuning && heldArr.every(n => !n.inferred);
     const perString = [];
     if (stringsKnown) {
       for (const [s, f] of Object.entries(shape)) {
@@ -291,5 +299,66 @@ export class ScaleDrill {
     this.statLine.textContent = total
       ? `${hits}/${total} in-key (${Math.round(100 * hits / total)}%)`
       : '';
+  }
+}
+
+// ── Tuner ───────────────────────────────────────────────────────────────
+// Pitch readout from MIDI: the sounded note plus its live bend in cents.
+// Matches the Jamstik app's tuner role; with real audio-in enabled the
+// input path is visualized on the scope rather than pitch-tracked.
+export class Tuner {
+  constructor(app) { this.app = app; }
+
+  activate(panel) {
+    this.app.fretboard.targets = null;
+    this.app.fretboard.scaleOverlay = null;
+    panel.append(el('div', 'hint',
+      'Play a string. The needle shows live pitch bend in cents (±100).'));
+    this.noteEl = el('div', 'big-readout', '—');
+    this.cv = el('canvas', 'tuner-cv');
+    this.detail = el('div', 'stats', '');
+    panel.append(this.noteEl, this.cv, this.detail);
+    this.lastStr = null;
+  }
+
+  deactivate() {}
+
+  onNoteOn(str) { this.lastStr = str; }
+  onNotesChange() {}
+
+  frame() {
+    const g = this.cv.getContext('2d');
+    const w = this.cv.clientWidth, h = this.cv.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    if (this.cv.width !== w * dpr) { this.cv.width = w * dpr; this.cv.height = h * dpr; }
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+
+    // ticks at -50, -25, 0, 25, 50 cents
+    for (const c of [-50, -25, 0, 25, 50]) {
+      const x = w / 2 + (c / 50) * (w / 2 - 14);
+      g.strokeStyle = c === 0 ? '#5eead4' : '#334155';
+      g.beginPath(); g.moveTo(x, h - 18); g.lineTo(x, h - 6); g.stroke();
+      g.fillStyle = '#64748b'; g.font = '9px ui-monospace, monospace'; g.textAlign = 'center';
+      g.fillText(c, x, h - 20);
+    }
+
+    const held = [...this.app.held.values()];
+    const entry = held.find(n => n.str === this.lastStr) || held[held.length - 1];
+    if (!entry) { this.noteEl.textContent = '—'; this.detail.textContent = ''; return; }
+
+    const cents = (entry.bend || 0) * 100;
+    const clamped = Math.max(-50, Math.min(50, cents));
+    const x = w / 2 + (clamped / 50) * (w / 2 - 14);
+    const inTune = Math.abs(cents) < 6;
+    g.strokeStyle = inTune ? '#34d399' : '#fbbf24';
+    g.lineWidth = 3;
+    g.beginPath(); g.moveTo(x, h - 34); g.lineTo(x, 4); g.stroke();
+    this.noteEl.textContent = midiName(entry.midi);
+    this.noteEl.style.color = inTune ? '#34d399' : '#cbd5e1';
+    this.detail.textContent =
+      `${STRING_NAMES[entry.str]} string · ${entry.midi - OPEN_MIDI[entry.str]} fret` +
+      ` · ${cents >= 0 ? '+' : ''}${cents.toFixed(0)} cents` +
+      (entry.inferred ? ' · position inferred' : '');
   }
 }

@@ -88,7 +88,7 @@ export class Fretboard {
       g.stroke();
       g.fillStyle = '#8892a8';
       g.textAlign = 'right';
-      g.fillText(STRING_NAMES[s], 34, this.stringY(s) + 3);
+      g.fillText(pcName(OPEN_MIDI[s]), 34, this.stringY(s) + 3); // label follows tuning
     }
 
     // scale overlay: muted dots for in-scale positions

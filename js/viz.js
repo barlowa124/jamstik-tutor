@@ -1,7 +1,7 @@
 // Visualization canvases: oscilloscope, spectrum bars, scrolling
 // spectrogram, and the wavetable frame display.
 
-import { waveFrame, pluckSpectrum } from './audio.js';
+import { waveFrame, PRESETS } from './audio.js';
 
 function prep(canvas) {
   const g = canvas.getContext('2d');
@@ -94,22 +94,23 @@ export class Spectrogram {
   }
 }
 
-// Wavetable viewer: one period of the synth's pluck wave at the three
-// brightness levels used by velocity buckets.
-export function drawWavetable(canvas) {
+// Wavetable viewer: one period of each preset currently assigned,
+// drawn live so splits show their different tables.
+export function drawWavetable(canvas, engine) {
   const { g, w, h } = prep(canvas);
   g.clearRect(0, 0, w, h);
-  const frames = [
-    { b: 0.9, color: '#5eead4', label: 'bright (vel>96)' },
-    { b: 0.6, color: '#60a0ff', label: 'mid' },
-    { b: 0.3, color: '#a78bfa', label: 'mellow' },
-  ];
-  const fh = h / frames.length;
-  frames.forEach((f, row) => {
-    const { real, imag } = pluckSpectrum(f.b);
+  const colors = ['#5eead4', '#60a0ff', '#a78bfa', '#f472b6', '#fbbf24', '#34d399'];
+  const used = engine
+    ? [...new Set([1, 2, 3, 4, 5, 6].map(s => engine.presetName(s)))]
+    : ['steel string'];
+  const rows = used.slice(0, 6);
+  const fh = h / rows.length;
+  rows.forEach((name, row) => {
+    const { real, imag } = PRESETS[name].wave({});
     const wave = waveFrame(real, imag);
+    const color = colors[row % colors.length];
     g.beginPath();
-    g.strokeStyle = f.color;
+    g.strokeStyle = color;
     g.lineWidth = 1.3;
     for (let i = 0; i < wave.length; i++) {
       const x = 10 + (i / wave.length) * (w - 20);
@@ -117,8 +118,8 @@ export function drawWavetable(canvas) {
       i === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
     }
     g.stroke();
-    g.fillStyle = f.color;
+    g.fillStyle = color;
     g.font = '9px ui-monospace, monospace';
-    g.fillText(f.label, 12, row * fh + 12);
+    g.fillText(name, 12, row * fh + 11);
   });
 }

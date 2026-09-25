@@ -1,21 +1,24 @@
 // App wiring: state, mode dispatch, render loop, device management.
 
-import { OPEN_MIDI, midiName, inferString } from './theory.js';
+import { OPEN_MIDI, midiName, inferString, setTuning, TUNINGS, currentTuningName } from './theory.js';
 import { MidiEngine, VirtualJamstik } from './midi.js';
-import { SynthEngine, RealInput, Metronome } from './audio.js';
+import { SynthEngine, RealInput, Metronome, SessionRecorder, PRESETS, PRESET_CATS, VELOCITY_CURVES } from './audio.js';
 import { Fretboard } from './fretboard.js';
 import { drawScope, drawSpectrum, drawWavetable, Spectrogram } from './viz.js';
-import { FreePlay, ChordTrainer, ScaleDrill } from './modes.js';
+import { FreePlay, ChordTrainer, ScaleDrill, Tuner } from './modes.js';
 
 const $ = id => document.getElementById(id);
 
 const app = {
-  held: new Map(), // string -> {midi, vel, bend}
+  held: new Map(), // voiceKey -> {str, midi, vel, bend, inferred}
   synth: new SynthEngine(),
   real: new RealInput(),
+  recorder: null,
   fretboard: null,
   source: null,    // MidiEngine | VirtualJamstik
   mode: null,
+  transpose: 0,
+  modeName: 'free',
 };
 
 // ── MIDI handlers ───────────────────────────────────────────────────────
@@ -24,6 +27,7 @@ const app = {
 // from pitch for display and flagged `inferred` (weaker coaching).
 const handlers = {
   onNoteOn(key, str, midi, vel) {
+    midi += app.transpose;
     let inferred = false;
     if (str == null) {
       const taken = new Set([...app.held.values()].map(n => n.str));
@@ -33,13 +37,14 @@ const handlers = {
       inferred = true;
     }
     app.held.set(key, { str, midi, vel, bend: 0, inferred });
-    app.synth.noteOn(key, midi, vel);
+    app.synth.noteOn(key, midi, vel, str);
     app.fretboard.active.set(str, { midi, bend: 0 });
     app.mode?.onNoteOn?.(str, midi);
     app.mode?.onNotesChange?.();
     logMidi(`on  s${str}${inferred ? '?' : ''} ${midiName(midi)} v${vel}`);
   },
   onNoteOff(key, str, midi) {
+    midi += app.transpose;
     // Auto mode can upgrade mid-strum: a note that arrived as 'n<midi>'
     // releases as 's<str>' once per-string mode resolves. Fall back to
     // matching by pitch so the off always finds its voice.
@@ -113,10 +118,11 @@ function fillDeviceList(inputs) {
 }
 
 // ── Modes ───────────────────────────────────────────────────────────────
-const MODES = { free: FreePlay, chords: ChordTrainer, scales: ScaleDrill };
+const MODES = { free: FreePlay, chords: ChordTrainer, scales: ScaleDrill, tuner: Tuner };
 
 function setMode(name) {
   app.mode?.deactivate?.();
+  app.modeName = name;
   const panel = $('mode-panel');
   panel.innerHTML = '';
   app.mode = new MODES[name](app);
@@ -193,6 +199,93 @@ function boardClick(e) {
   addEventListener('pointerup', up);
 }
 
+// ── Sounds panel: presets, string assignment, FX, tuning ───────────────
+function buildSoundsPanel() {
+  const p = $('sounds-panel');
+  p.innerHTML = '';
+
+  const el = (tag, cls, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+
+  // tuning + transpose + velocity row
+  const row1 = el('div', 'row');
+  const tunSel = el('select');
+  for (const n of Object.keys(TUNINGS)) tunSel.append(el('option', '', n));
+  tunSel.value = currentTuningName();
+  tunSel.title = 'tuning';
+  tunSel.onchange = () => { setTuning(tunSel.value); setMode(app.modeName); };
+  const trSel = el('select');
+  for (let i = -12; i <= 12; i++) trSel.append(el('option', '', (i > 0 ? '+' : '') + i));
+  trSel.value = '0';
+  trSel.title = 'transpose (semitones)';
+  trSel.onchange = () => { app.transpose = +trSel.value; };
+  const velSel = el('select');
+  for (const n of Object.keys(VELOCITY_CURVES)) velSel.append(el('option', '', `vel: ${n}`));
+  velSel.onchange = () => { app.synth.curveName = velSel.value.slice(5); };
+  row1.append(tunSel, trSel, velSel);
+  p.append(row1);
+
+  // string assignment chips: pick strings, then click a preset
+  const chips = el('div', 'chips');
+  const picked = new Set();
+  for (const s of [1, 2, 3, 4, 5, 6]) {
+    const c = el('button', 'chip', `${s}`);
+    c.onclick = () => { picked.has(s) ? picked.delete(s) : picked.add(s); c.classList.toggle('on', picked.has(s)); };
+    chips.append(c);
+  }
+  p.append(el('div', 'hint', 'pick strings (empty = all), then a preset:'));
+  p.append(chips);
+
+  // preset grid grouped by category
+  for (const cat of PRESET_CATS) {
+    const grid = el('div', 'preset-grid');
+    for (const [name, spec] of Object.entries(PRESETS)) {
+      if (spec.cat !== cat) continue;
+      const b = el('button', 'preset', name);
+      b.onclick = () => {
+        app.synth.setPreset(name, picked.size ? [...picked] : null);
+        drawWavetable($('wavetable'), app.synth);
+        for (const c of chips.children) c.classList.remove('on');
+        picked.clear();
+      };
+      grid.append(b);
+    }
+    p.append(el('div', 'cat-label', cat));
+    p.append(grid);
+  }
+
+  // FX sliders
+  p.append(el('div', 'cat-label', 'effects'));
+  const slider = (label, min, max, val, cb) => {
+    const row = el('div', 'fx-row');
+    row.append(el('span', 'fx-label', label));
+    const s = el('input');
+    s.type = 'range'; s.min = min; s.max = max; s.value = val;
+    s.oninput = () => cb(+s.value);
+    row.append(s);
+    p.append(row);
+  };
+  slider('drive', 0, 100, 0, v => { app.synth.fx.drive = v / 100; app.synth.applyFX(); });
+  slider('tone', 800, 12000, 12000, v => { app.synth.fx.tone = v; app.synth.applyFX(); });
+  slider('delay', 0, 100, 0, v => { app.synth.fx.delay = v / 100; app.synth.applyFX(); });
+  slider('reverb', 0, 100, 0, v => { app.synth.fx.reverb = v / 100; app.synth.applyFX(); });
+  slider('master', 0, 100, 80, v => { app.synth.master.gain.value = v / 100; });
+
+  // record
+  const rec = el('button', '', '⏺ record');
+  rec.onclick = async () => {
+    app.recorder ??= new SessionRecorder(app.synth);
+    if (!app.recorder.running) { app.recorder.start(); rec.textContent = '■ recording…'; }
+    else { await app.recorder.stop(); rec.textContent = '⏺ record'; }
+  };
+  p.append(el('div', 'cat-label', 'capture'));
+  p.append(rec);
+}
+
 // ── Render loop ─────────────────────────────────────────────────────────
 const spectro = { g: null };
 
@@ -203,6 +296,7 @@ function frame() {
   drawScope($('scope'), [synthSrc, realSrc]);
   drawSpectrum($('spectrum'), [synthSrc, realSrc]);
   spectro.g.draw(app.synth.analyser);
+  app.mode?.frame?.();
   requestAnimationFrame(frame);
 }
 
@@ -210,9 +304,10 @@ function frame() {
 function init() {
   app.fretboard = new Fretboard($('board'));
   spectro.g = new Spectrogram($('spectrogram'));
-  drawWavetable($('wavetable'));
+  drawWavetable($('wavetable'), app.synth);
   fillDeviceList([]);
   buildDemoPanel();
+  buildSoundsPanel();
   setMode('free');
 
   $('connect').onclick = connectSource;

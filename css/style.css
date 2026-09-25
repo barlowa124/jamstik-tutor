@@ -131,3 +131,25 @@ footer {
   color: var(--dim);
 }
 .viz-cell canvas { flex: 1; width: 100%; min-height: 0; }
+
+/* sounds panel */
+#sounds-wrap { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 8px; }
+#sounds-wrap summary {
+  cursor: pointer; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim);
+  margin-bottom: 8px;
+}
+.cat-label {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; color: #475569; margin: 10px 0 4px;
+}
+.chips { display: flex; gap: 4px; margin-bottom: 4px; }
+.chip { width: 30px; text-align: center; padding: 4px 0; }
+.chip.on { border-color: var(--accent); color: var(--accent); background: rgba(45,212,191,0.1); }
+.preset-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+.preset { text-align: left; font-size: 11px; }
+.preset:hover { border-color: var(--accent); color: var(--accent); }
+.fx-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.fx-label { width: 52px; font-size: 11px; color: var(--dim); }
+.fx-row input[type=range] { flex: 1; accent-color: #14b8a6; height: 18px; }
+.tuner-cv { width: 100%; height: 70px; display: block; }

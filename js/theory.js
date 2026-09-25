@@ -14,6 +14,36 @@ export const STRING_NAMES = { 1: 'e', 2: 'B', 3: 'G', 4: 'D', 5: 'A', 6: 'E' };
 export const STRING_COUNT = 6;
 export const FRET_COUNT = 15;
 
+// Alternate tunings, open MIDI per string 1..6 (high e .. low E).
+// setTuning mutates OPEN_MIDI in place so every consumer (inference,
+// fret math, scale positions, trainer verdicts) follows automatically.
+export const TUNINGS = {
+  'standard':       [64, 59, 55, 50, 45, 40],
+  'drop D':         [64, 59, 55, 50, 45, 38],
+  'DADGAD':         [62, 57, 55, 50, 45, 38],
+  'open G':         [62, 59, 55, 50, 43, 38],
+  'open D':         [62, 57, 54, 50, 45, 38],
+  'open C':         [64, 60, 55, 48, 43, 36],
+  'open E':         [64, 59, 56, 52, 47, 40],
+  'drop C':         [62, 59, 55, 50, 43, 36],
+  'half-step down': [63, 58, 54, 49, 44, 39],
+  'whole-step down':[62, 57, 53, 48, 43, 38],
+};
+
+export function setTuning(name) {
+  const t = TUNINGS[name];
+  if (!t) return false;
+  for (let s = 1; s <= 6; s++) OPEN_MIDI[s] = t[s - 1];
+  return true;
+}
+
+export function currentTuningName() {
+  for (const [name, t] of Object.entries(TUNINGS)) {
+    if ([1, 2, 3, 4, 5, 6].every(s => OPEN_MIDI[s] === t[s - 1])) return name;
+  }
+  return 'custom';
+}
+
 export const fretFor = (stringNum, midi) => midi - OPEN_MIDI[stringNum];
 
 // When the device sends single-channel MIDI it does not name the string.

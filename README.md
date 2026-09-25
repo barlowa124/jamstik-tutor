@@ -51,6 +51,10 @@ sweep. You can also click frets on the board directly.
 
 ## Modes
 
+- **Tuner**: sounded note, string/fret, and a cents needle driven by live
+  pitch-bend data (±50 display, ±100 tracked). The Jamstik reports MIDI
+  pitch, not pickup frequency, so the needle shows sounded pitch
+  including bends instead of measured string frequency.
 - **Free play**: live note names and bend amounts on the fretboard, plus
   a chord readout that resolves stable voicings (including slash chords
   and no-5th voicings like x32310 C7).
@@ -63,12 +67,38 @@ sweep. You can also click frets on the board directly.
   scores each note as in or out of key. *Run* walks a position box up
   and down and tracks position-accurate progress.
 
+## Sounds
+
+The sounds panel (right side, below the mode panel) covers the
+playback-side surface of the Jamstik Creator app:
+
+- **Presets**: 14 wavetable voices across guitar (steel, nylon,
+  electric clean, 12-string), bass (electric, synth, both transposed an
+  octave down), keys (piano-ish, drawbar organ, vibe), and synth
+  (saw/square leads, soft/brass pads, flute-ish). Each is a PeriodicWave
+  harmonic recipe plus its own envelope. Some stack detuned oscillators.
+- **Assignment**: pick string chips, then a preset, for splits (e.g.
+  electric bass on 4-5-6 with saw lead on 1-2-3). Empty selection
+  applies to all strings.
+- **Tuning**: 10 alternate tunings (drop D, DADGAD, open G/D/C/E, drop C,
+  half/whole-step down). Fret positions, scale overlays, string labels,
+  and chord verdicts all follow. Chord *shapes* assume standard, and the
+  trainer says so when they do not apply.
+- **Transpose**: ±12 semitones on incoming MIDI (capo/pitch-shift).
+- **Effects**: drive (waveshaper), tone (lowpass), delay, reverb
+  (generated impulse), master volume.
+- **Velocity curves**: linear / soft / hard response into the synth.
+- **Record**: captures the synth output to a `.webm` download.
+
+Device-side settings the Jamstik app exposes (firmware flashing,
+hammer-on thresholds, pickup sensitivity calibration) go over its
+proprietary sysex/BLE channel and are intentionally not reimplemented.
+
 ## Audio
 
 - **Synth** (default): a wavetable engine with one monophonic voice per
-  string. `PeriodicWave` tables are shaped like a plucked string (1/n
-  harmonic decay with a ~1/7 pluck-position null). Velocity picks
-  bright/mid/mellow tables, and per-string pitch bend maps to detune.
+  string (polyphonic per note in single-channel mode). Pitch bend maps
+  to detune per voice.
 - **Input** (optional): *enable audio in* captures the Jamstik's analog
   out, or any interface, via `getUserMedia` for real-waveform
   visualization. It is never routed to speakers, so no feedback loop.
@@ -85,7 +115,8 @@ traces overlay in teal and pink.
 index.html          shell + canvases
 js/theory.js        tuning, chord dictionary/detection, scale tables
 js/midi.js          Web MIDI engine, channel->string map, VirtualJamstik
-js/audio.js         wavetable synth, real-input capture, metronome
+js/audio.js         preset wavetable synth, FX chain, real-input capture,
+                    recorder, metronome
 js/fretboard.js     canvas board: notes, bends, targets, scale overlay
 js/viz.js           scope / spectrum / spectrogram / wavetable frames
 js/modes.js         free play, chord trainer, scale drills
