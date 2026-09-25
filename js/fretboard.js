@@ -32,6 +32,13 @@ export class Fretboard {
     return 44 + usable * (1 - Math.pow(2, -f / 12)) / span;
   }
 
+  // Center of fret f's playing space: open notes sit on the nut, fret f
+  // occupies the space between wires f-1 and f.
+  fretCenter(f) {
+    if (f <= 0) return 44;
+    return (this.fretX(f - 1) + this.fretX(f)) / 2;
+  }
+
   stringY(s) {
     const top = 34, bottom = this.h - 30;
     return top + (6 - s) * (bottom - top) / 5; // string 1 (high e) on top
@@ -54,19 +61,19 @@ export class Fretboard {
       g.moveTo(x, this.stringY(1) - 12);
       g.lineTo(x, this.stringY(6) + 12);
       g.stroke();
-      g.fillText(f, (x + this.fretX(f + 1)) / 2 || x + 14, this.h - 8);
+      if (f > 0 && f <= 12) g.fillText(f, this.fretCenter(f), this.h - 8);
     }
 
-    // inlay dots
+    // inlay dots at fret positions 3,5,7,9,15 and the octave pair at 12
     g.fillStyle = '#232c3f';
     for (const f of [3, 5, 7, 9, 15]) {
       g.beginPath();
-      g.arc((this.fretX(f) + this.fretX(f + 1)) / 2, (this.stringY(1) + this.stringY(6)) / 2, 5, 0, 7);
+      g.arc(this.fretCenter(f), (this.stringY(1) + this.stringY(6)) / 2, 5, 0, 7);
       g.fill();
     }
-    for (const y of [0.32, 0.68]) { // octave double-dot at 12
+    for (const y of [0.32, 0.68]) {
       g.beginPath();
-      g.arc((this.fretX(12) + this.fretX(13)) / 2,
+      g.arc(this.fretCenter(12),
             this.stringY(1) + y * (this.stringY(6) - this.stringY(1)), 5, 0, 7);
       g.fill();
     }
@@ -87,7 +94,7 @@ export class Fretboard {
     // scale overlay: muted dots for in-scale positions
     if (this.scaleOverlay) {
       for (const p of this.scaleOverlay) {
-        const x = p.fret === 0 ? 44 : (this.fretX(p.fret) + this.fretX(p.fret + 1)) / 2;
+        const x = this.fretCenter(p.fret);
         const y = this.stringY(p.string);
         g.beginPath();
         g.arc(x, y, 6, 0, 7);
@@ -106,7 +113,7 @@ export class Fretboard {
           g.fillText('×', 44, y - 10);
           continue;
         }
-        const x = f === 0 ? 44 : (this.fretX(f) + this.fretX(f + 1)) / 2;
+        const x = this.fretCenter(f);
         g.beginPath();
         g.arc(x, y, 9, 0, 7);
         g.strokeStyle = '#fbbf24';
@@ -123,7 +130,7 @@ export class Fretboard {
     for (const [s, n] of this.active) {
       const fret = n.midi - OPEN_MIDI[s];
       if (fret < 0 || fret > FRET_COUNT) continue;
-      const x = fret === 0 ? 44 : (this.fretX(fret) + this.fretX(fret + 1)) / 2;
+      const x = this.fretCenter(fret);
       const y = this.stringY(s) - (n.bend || 0) * 6;
       g.beginPath();
       g.arc(x, y, 10, 0, 7);

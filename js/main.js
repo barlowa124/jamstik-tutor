@@ -118,10 +118,11 @@ function buildDemoPanel() {
   const run = document.createElement('button');
   run.textContent = 'A min-pent run';
   run.onclick = () => {
-    // A minor pentatonic, open position, strings 6->1 ascending
+    // A minor pentatonic box 1 (open position), strings 6->1 ascending.
+    // Frets per string: E:0,3 A:0,3 D:0,2 G:0,2 B:1,3 e:0,3
     const events = [];
     const positions = [
-      [6, 0], [6, 3], [5, 0], [5, 2], [4, 0], [4, 2],
+      [6, 0], [6, 3], [5, 0], [5, 3], [4, 0], [4, 2],
       [3, 0], [3, 2], [2, 1], [2, 3], [1, 0], [1, 3],
     ];
     positions.concat([...positions].reverse().slice(1))
@@ -156,7 +157,7 @@ function boardClick(e) {
   }
   let fret = 0;
   for (let f = 0; f <= 15; f++) {
-    if (Math.abs(x - fb.fretX(f)) < Math.abs(x - fb.fretX(fret))) fret = f;
+    if (Math.abs(x - fb.fretCenter(f)) < Math.abs(x - fb.fretCenter(fret))) fret = f;
   }
   const midi = OPEN_MIDI[bestStr] + fret;
   app.source.noteOn(bestStr, midi, 95);

@@ -21,7 +21,8 @@ export class FreePlay {
     this.app.fretboard.scaleOverlay = null;
     panel.append(el('div', 'hint',
       'Play anything. Held notes are named live; stable voicings resolve to a chord.'));
-    this.readout = el('div', 'big-readout', '—');
+    this.readout = el('div', 'big-readout', 'no notes held');
+    this.readout.style.color = '#334155';
     this.notes = el('div', 'held-notes', '');
     panel.append(this.readout, this.notes);
     this.debounce = null;
@@ -37,7 +38,11 @@ export class FreePlay {
     this.notes.textContent = midis.length
       ? [...this.app.held.entries()].map(([s, n]) => `${STRING_NAMES[s]}:${midiName(n.midi)}`).join('  ')
       : '';
-    if (!midis.length) { this.readout.textContent = '—'; return; }
+    if (!midis.length) {
+      this.readout.textContent = 'no notes held';
+      this.readout.style.color = '#334155';
+      return;
+    }
     const c = detectChord(midis);
     this.readout.textContent = c ? c.label : midis.map(midiName).join(' ');
     this.readout.style.color = c ? '#5eead4' : '#94a3b8';
