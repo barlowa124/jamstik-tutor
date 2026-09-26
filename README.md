@@ -86,18 +86,25 @@ playback-side surface of the Jamstik Creator app:
 - **Assignment**: pick string chips, then a preset, for splits (e.g.
   electric bass on 4-5-6 with saw lead on 1-2-3). Empty selection
   applies to all strings.
-- **Tuning**: 10 alternate tunings (drop D, DADGAD, open G/D/C/E, drop C,
-  half/whole-step down). Fret positions, scale overlays, string labels,
-  and chord verdicts all follow. Chord *shapes* assume standard, and the
-  trainer says so when they do not apply.
+- **Tuning**: 10 preset tunings (drop D, DADGAD, open G/D/C/E, drop C,
+  half/whole-step down) plus **custom**, which opens a per-string open
+  note picker. Everything downstream follows: fret positions, scale
+  overlays, string labels, chord verdicts. Chord *shapes* assume standard, and the trainer
+  says so when they do not apply.
 - **Transpose**: ±12 semitones on incoming MIDI (capo/pitch-shift).
 - **Effects**: drive (waveshaper), tone (lowpass), delay, reverb
   (generated impulse), master volume.
 - **Velocity curves**: linear / soft / hard response into the synth.
-- **Record**: two captures. `record` saves the synth audio as `.webm`.
-  `.mid` records incoming note-on/off events with timing and exports a
-  Standard MIDI File (format 0, 480 PPQ, channels 1-6 by string) that
-  drops into any DAW.
+- **Record**: `record` saves the synth audio as `.webm`. `.mid` records
+  note-on/off and pitch-bend events with timing and exports a Standard
+  MIDI File (format 0, 480 PPQ, channels 1-6 by string, bends encoded at
+  the usual +/-2 wheel assumption) for any DAW. `take` replays the last
+  MIDI recording through the app's own pipeline, so a take shows up on
+  the board and waterfall exactly as it was played.
+
+Settings persist in `localStorage`: tuning (including custom), transpose,
+velocity curve, FX levels, preset splits, channel mode, bend range, and
+metronome BPM all survive a reload.
 
 Device-side settings the Jamstik app exposes (firmware flashing,
 hammer-on thresholds, pickup sensitivity calibration) go over its

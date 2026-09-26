@@ -148,21 +148,72 @@ export class VirtualJamstik {
 }
 
 // Records note events and exports a Standard MIDI File (format 0,
-// 480 PPQ, 120 BPM) for dropping into any DAW.
+// 480 PPQ, 120 BPM) for dropping into any DAW. `str` is the real
+// string (1-6) or null when the device did not name one, so playback
+// can take the inferred path instead of claiming strings. SMF channels
+// map str-1, falling back to channel 1 for inferred notes.
 export class MidiRecorder {
   constructor() { this.events = []; this.t0 = null; }
   get running() { return this.t0 !== null; }
 
   start() { this.events = []; this.t0 = performance.now(); }
 
-  add(on, ch, midi, vel) {
+  // `midi` is the sounded pitch (exported to SMF); `raw` is the
+  // pre-transpose note the device sent (what playback feeds back in).
+  add(on, str, midi, vel, raw = midi) {
     if (!this.running) return;
-    this.events.push({ ms: performance.now() - this.t0, on, ch: Math.max(0, Math.min(15, ch)), midi, vel });
+    this.events.push({ ms: performance.now() - this.t0, on, str: str ?? null, midi, raw, vel });
+  }
+
+  bend(str, semis) {
+    if (!this.running) return;
+    // ±2 semitone wheel assumption, the same default a DAW applies.
+    const v = Math.max(0, Math.min(16383, Math.round(8192 + (semis / 2) * 8192)));
+    this.events.push({ ms: performance.now() - this.t0, bend: true, str: str ?? null, semis, v });
   }
 
   stop() {
     this.t0 = null;
     return buildSmf(this.events);
+  }
+}
+
+// Replays recorded events through the app's normal handlers, so a take
+// shows up on the board, waterfall, and readout exactly as played.
+export class MidiPlayer {
+  constructor(handlers) {
+    this.h = handlers;
+    this.timers = [];
+    this.onDone = null;
+  }
+
+  get playing() { return this.timers.length > 0; }
+
+  play(events, onDone) {
+    this.stop();
+    this.onDone = onDone;
+    let end = 0;
+    events.forEach((e, i) => {
+      const t = setTimeout(() => {
+        if (e.bend) this.h.onPitchBend?.(e.str, e.semis);
+        else if (e.on) this.h.onNoteOn?.(`p${i}`, e.str, e.raw ?? e.midi, e.vel);
+        else this.h.onNoteOff?.(`p${i}`, e.str, e.raw ?? e.midi);
+      }, e.ms);
+      this.timers.push(t);
+      end = Math.max(end, e.ms);
+    });
+    this.timers.push(setTimeout(() => this.finish(), end + 50));
+  }
+
+  finish() {
+    this.stop();
+    this.h.onAllOff?.();
+    this.onDone?.();
+  }
+
+  stop() {
+    this.timers.forEach(clearTimeout);
+    this.timers = [];
   }
 }
 
@@ -182,7 +233,9 @@ function buildSmf(events) {
     const t = msToTicks(e.ms);
     track.push(...varLen(Math.max(0, t - last)));
     last = t;
-    track.push((e.on ? 0x90 : 0x80) | e.ch, e.midi & 0x7f, e.vel & 0x7f);
+    const ch = e.str == null ? 0 : Math.max(0, Math.min(15, e.str - 1));
+    if (e.bend) track.push(0xe0 | ch, e.v & 0x7f, (e.v >> 7) & 0x7f);
+    else track.push((e.on ? 0x90 : 0x80) | ch, e.midi & 0x7f, e.vel & 0x7f);
   }
   track.push(0x00, 0xff, 0x2f, 0x00);
   const head = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, TPQ >> 8, TPQ & 0xff,

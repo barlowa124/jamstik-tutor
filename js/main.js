@@ -1,7 +1,7 @@
 // App wiring: state, mode dispatch, render loop, device management.
 
-import { OPEN_MIDI, midiName, inferString, setTuning, TUNINGS, currentTuningName } from './theory.js';
-import { MidiEngine, VirtualJamstik, MidiRecorder } from './midi.js';
+import { OPEN_MIDI, midiName, inferString, setTuning, setTuningValues, TUNINGS, currentTuningName, STRING_NAMES } from './theory.js';
+import { MidiEngine, VirtualJamstik, MidiRecorder, MidiPlayer } from './midi.js';
 import { SynthEngine, RealInput, Metronome, SessionRecorder, PRESETS, PRESET_CATS, VELOCITY_CURVES } from './audio.js';
 import { Fretboard } from './fretboard.js';
 import { drawScope, drawSpectrum, drawWavetable, drawWaterfall, Spectrogram } from './viz.js';
@@ -27,6 +27,59 @@ const app = {
 // key: voice key ('s<n>' per string, 'n<midi>' per note). str is null
 // when the device sends single-channel MIDI — string is then inferred
 // from pitch for display and flagged `inferred` (weaker coaching).
+// Control registry + localStorage persistence so presets, tuning, FX,
+// and header options survive a reload.
+const ui = {};
+const SETKEY = 'jamstik-tutor-settings-v1';
+
+function saveSettings() {
+  try {
+    localStorage.setItem(SETKEY, JSON.stringify({
+      tuning: [1, 2, 3, 4, 5, 6].map(s => OPEN_MIDI[s]),
+      transpose: app.transpose,
+      curve: app.synth.curveName,
+      fx: { ...app.synth.fx },
+      master: app.synth.masterLevel,
+      presets: { ...app.synth.presetByString },
+      chanMode: $('chan-mode').value,
+      flip: $('flip').checked,
+      bend: $('bend-range').value,
+      bpm: $('bpm').value,
+    }));
+  } catch { /* storage unavailable */ }
+}
+
+function restoreSettings() {
+  let s;
+  try { s = JSON.parse(localStorage.getItem(SETKEY)); } catch { return; }
+  if (!s) return;
+  if (s.flip != null) $('flip').checked = !!s.flip;
+  if (s.bend != null) $('bend-range').value = s.bend;
+  if (s.bpm != null) $('bpm').value = s.bpm;
+  if (s.chanMode != null) $('chan-mode').value = s.chanMode;
+  if (Array.isArray(s.tuning)) setTuningValues(s.tuning);
+  if (s.transpose != null) app.transpose = +s.transpose;
+  if (s.curve) app.synth.curveName = s.curve;
+  if (s.fx) Object.assign(app.synth.fx, s.fx);
+  if (s.master != null) app.synth.masterLevel = s.master;
+  if (s.presets) for (const [str, name] of Object.entries(s.presets)) {
+    if (PRESETS[name]) app.synth.presetByString[+str] = name;
+  }
+  // Reflect everything into the rebuilt panel controls.
+  if (ui.tunSel) {
+    ui.tunSel.value = currentTuningName();
+    ui.customRow.style.display = ui.tunSel.value === 'custom' ? '' : 'none';
+    ui.syncCustom();
+  }
+  if (ui.trSel) ui.trSel.value = (app.transpose > 0 ? '+' : '') + app.transpose;
+  if (ui.velSel) ui.velSel.value = `vel: ${app.synth.curveName}`;
+  if (ui.fx_drive) ui.fx_drive.value = app.synth.fx.drive * 100;
+  if (ui.fx_tone) ui.fx_tone.value = app.synth.fx.tone;
+  if (ui.fx_delay) ui.fx_delay.value = app.synth.fx.delay * 100;
+  if (ui.fx_reverb) ui.fx_reverb.value = app.synth.fx.reverb * 100;
+  if (ui.fx_master) ui.fx_master.value = app.synth.masterLevel * 100;
+}
+
 const handlers = {
   onNoteOn(key, str, rawMidi, vel) {
     const midi = rawMidi + app.transpose;
@@ -41,7 +94,7 @@ const handlers = {
     app.held.set(key, { str, midi, rawMidi, vel, bend: 0, inferred });
     app.history.push({ key, str, midi, vel, t0: performance.now(), t1: null, inferred });
     if (app.history.length > 2000) app.history.shift();
-    app.midiRec?.add(true, str - 1, midi, vel);
+    app.midiRec?.add(true, inferred ? null : str, midi, vel, rawMidi);
     app.synth.noteOn(key, midi, vel, str);
     app.fretboard.active.set(str, { midi, bend: 0 });
     app.mode?.onNoteOn?.(str, midi);
@@ -64,7 +117,7 @@ const handlers = {
     app.held.delete(k);
     const open = [...app.history].reverse().find(e => e.key === k && e.t1 === null);
     if (open) open.t1 = performance.now();
-    app.midiRec?.add(false, (n.str - 1), n.midi, 64);
+    app.midiRec?.add(false, n.inferred ? null : n.str, n.midi, 64, n.rawMidi);
     app.synth.noteOff(k, n.midi); // stored pitch -> the guard always passes
     app.mode?.onNoteOff?.(n.str ?? str, n.midi);
     app.mode?.onNotesChange?.();
@@ -80,6 +133,7 @@ const handlers = {
     logMidi('all notes off');
   },
   onPitchBend(str, semis) {
+    app.midiRec?.bend(str, semis);
     if (str == null) {
       app.synth.bendAll(semis);
       for (const n of app.held.values()) n.bend = semis;
@@ -233,19 +287,59 @@ function buildSoundsPanel() {
   const row1 = el('div', 'row');
   const tunSel = el('select');
   for (const n of Object.keys(TUNINGS)) tunSel.append(el('option', '', n));
+  tunSel.append(el('option', '', 'custom'));
   tunSel.value = currentTuningName();
   tunSel.title = 'tuning';
-  tunSel.onchange = () => { setTuning(tunSel.value); setMode(app.modeName); };
+  const customRow = el('div', 'row');
+  customRow.style.display = 'none';
+  const syncCustom = () => {
+    for (const cs of customRow.querySelectorAll('select')) cs.value = OPEN_MIDI[cs.dataset.str];
+  };
+  const applyCustom = () => {
+    const vals = [];
+    for (const cs of customRow.querySelectorAll('select')) vals[+cs.dataset.str - 1] = +cs.value;
+    setTuningValues(vals);
+    setMode(app.modeName);
+    saveSettings();
+  };
+  for (const s of [6, 5, 4, 3, 2, 1]) {
+    const cs = el('select');
+    cs.dataset.str = s;
+    cs.title = `open note of the ${STRING_NAMES[s]} string`;
+    for (let m = 24; m <= 72; m++) {
+      const o = el('option', '', midiName(m));
+      o.value = m;
+      cs.append(o);
+    }
+    cs.value = OPEN_MIDI[s];
+    cs.onchange = applyCustom;
+    customRow.append(el('span', 'fx-label', STRING_NAMES[s]), cs);
+  }
+  tunSel.onchange = () => {
+    if (tunSel.value === 'custom') {
+      customRow.style.display = '';
+      syncCustom();
+      applyCustom();
+    } else {
+      customRow.style.display = 'none';
+      setTuning(tunSel.value);
+      syncCustom();
+      setMode(app.modeName);
+    }
+    saveSettings();
+  };
   const trSel = el('select');
   for (let i = -12; i <= 12; i++) trSel.append(el('option', '', (i > 0 ? '+' : '') + i));
   trSel.value = '0';
   trSel.title = 'transpose (semitones)';
-  trSel.onchange = () => { app.transpose = +trSel.value; };
+  trSel.onchange = () => { app.transpose = +trSel.value; saveSettings(); };
   const velSel = el('select');
   for (const n of Object.keys(VELOCITY_CURVES)) velSel.append(el('option', '', `vel: ${n}`));
-  velSel.onchange = () => { app.synth.curveName = velSel.value.slice(5); };
+  velSel.onchange = () => { app.synth.curveName = velSel.value.slice(5); saveSettings(); };
   row1.append(tunSel, trSel, velSel);
   p.append(row1);
+  p.append(customRow);
+  ui.tunSel = tunSel; ui.trSel = trSel; ui.velSel = velSel; ui.customRow = customRow; ui.syncCustom = syncCustom;
 
   // string assignment chips: pick strings, then click a preset
   const chips = el('div', 'chips');
@@ -266,6 +360,7 @@ function buildSoundsPanel() {
       const b = el('button', 'preset', name);
       b.onclick = () => {
         app.synth.setPreset(name, picked.size ? [...picked] : null);
+        saveSettings();
         drawWavetable($('wavetable'), app.synth);
         drawWaterfall($('waterfall'), app.history, app.held, performance.now());
         for (const c of chips.children) c.classList.remove('on');
@@ -284,15 +379,19 @@ function buildSoundsPanel() {
     row.append(el('span', 'fx-label', label));
     const s = el('input');
     s.type = 'range'; s.min = min; s.max = max; s.value = val;
-    s.oninput = () => cb(+s.value);
+    s.oninput = () => { cb(+s.value); saveSettings(); };
     row.append(s);
+    ui[`fx_${label}`] = s;
     p.append(row);
   };
   slider('drive', 0, 100, 0, v => { app.synth.fx.drive = v / 100; app.synth.applyFX(); });
   slider('tone', 800, 12000, 12000, v => { app.synth.fx.tone = v; app.synth.applyFX(); });
   slider('delay', 0, 100, 0, v => { app.synth.fx.delay = v / 100; app.synth.applyFX(); });
   slider('reverb', 0, 100, 0, v => { app.synth.fx.reverb = v / 100; app.synth.applyFX(); });
-  slider('master', 0, 100, 80, v => { app.synth.master.gain.value = v / 100; });
+  slider('master', 0, 100, 80, v => {
+    app.synth.masterLevel = v / 100;
+    if (app.synth.master) app.synth.master.gain.value = v / 100;
+  });
 
   // record
   const rec = el('button', '', '⏺ record');
@@ -302,10 +401,13 @@ function buildSoundsPanel() {
     else { await app.recorder.stop(); rec.textContent = '⏺ record'; }
   };
   const midRec = el('button', '', '⏺ .mid');
+  const midPlay = el('button', '', '▶ take');
+  midPlay.disabled = true;
   midRec.onclick = () => {
     app.midiRec ??= new MidiRecorder();
     if (!app.midiRec.running) { app.midiRec.start(); midRec.textContent = '■ midi…'; }
     else {
+      const events = app.midiRec.events.slice();
       const blob = new Blob([app.midiRec.stop()], { type: 'audio/midi' });
       const a = el('a');
       a.href = URL.createObjectURL(blob);
@@ -313,10 +415,21 @@ function buildSoundsPanel() {
       a.click();
       URL.revokeObjectURL(a.href);
       midRec.textContent = '⏺ .mid';
+      app.lastMidi = events;
+      midPlay.disabled = !events.length;
+    }
+  };
+  midPlay.onclick = () => {
+    app.midiPlayer ??= new MidiPlayer(handlers);
+    if (app.midiPlayer.playing) { app.midiPlayer.finish(); }
+    else if (app.lastMidi?.length) {
+      app.synth.ensure();
+      app.midiPlayer.play(app.lastMidi, () => { midPlay.textContent = '▶ take'; });
+      midPlay.textContent = '■ playing…';
     }
   };
   p.append(el('div', 'cat-label', 'capture'));
-  p.append(rec, midRec);
+  p.append(rec, midRec, midPlay);
 }
 
 // ── Render loop ─────────────────────────────────────────────────────────
@@ -351,8 +464,14 @@ function init() {
       app.source.chanMode = $('chan-mode').value;
       app.source.seenCh.clear();
     }
+    saveSettings();
   };
-  $('bend-range').onchange = () => { if (app.source instanceof MidiEngine) app.source.bendRangeSemis = +$('bend-range').value; };
+  $('flip').addEventListener('change', saveSettings);
+  $('bend-range').onchange = () => {
+    if (app.source instanceof MidiEngine) app.source.bendRangeSemis = +$('bend-range').value;
+    saveSettings();
+  };
+  $('bpm').addEventListener('change', saveSettings);
   $('board').addEventListener('pointerdown', boardClick);
   for (const b of document.querySelectorAll('.mode-tab')) {
     b.onclick = () => setMode(b.dataset.mode);
@@ -390,6 +509,7 @@ function init() {
     }
   };
 
+  restoreSettings();
   requestAnimationFrame(frame);
 
   // Debug/test hook: inspect app state and inject events from devtools,

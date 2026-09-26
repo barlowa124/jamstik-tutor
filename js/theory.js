@@ -37,6 +37,15 @@ export function setTuning(name) {
   return true;
 }
 
+// Direct open-note values for the custom tuning editor. Values outside
+// a sane open-string range are ignored rather than clamped silently.
+export function setTuningValues(arr) {
+  for (let s = 1; s <= 6; s++) {
+    const v = arr[s - 1] | 0;
+    if (v >= 12 && v <= 84) OPEN_MIDI[s] = v;
+  }
+}
+
 export function currentTuningName() {
   for (const [name, t] of Object.entries(TUNINGS)) {
     if ([1, 2, 3, 4, 5, 6].every(s => OPEN_MIDI[s] === t[s - 1])) return name;

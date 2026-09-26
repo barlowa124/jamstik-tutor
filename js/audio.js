@@ -79,6 +79,7 @@ export class SynthEngine {
     this.voices = new Map(); // key -> {oscs[], gain, midi, str, preset}
     this.stringGain = 0.28;
     this.curveName = 'linear';
+    this.masterLevel = 0.8;
     this.defaultPreset = 'steel string';
     this.presetByString = {}; // string -> preset name override
     this.waveCache = new Map();
@@ -111,7 +112,7 @@ export class SynthEngine {
     if (!this.ctx) {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.8;
+      this.master.gain.value = this.masterLevel;
 
       // FX chain: master -> shaper -> tone -> dry+wet(delay,reverb) -> analyser -> out
       this.shaper = this.ctx.createWaveShaper();
