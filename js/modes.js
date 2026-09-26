@@ -77,7 +77,9 @@ export class FreePlay {
     if (!this.backing) return;
     clearTimeout(this.backing.timer);
     this.backing = null;
-    for (let s = 1; s <= 6; s++) this.app.synth.noteOff(`bk${s}`, 0);
+    // null midi = unconditional release; passing a pitch risks a
+    // stale-off rejection and an orphaned ringing voice.
+    for (let s = 1; s <= 6; s++) this.app.synth.noteOff(`bk${s}`, null);
     this.bkBtn.textContent = '▶ play';
   }
 
@@ -186,8 +188,10 @@ export class ChordTrainer {
       if (f === null) continue;
       const delay = (6 - +s) * 25;
       const midi = OPEN_MIDI[s] + f;
-      setTimeout(() => this.app.synth.noteOn(`s${s}`, midi, 92, +s), delay);
-      setTimeout(() => this.app.synth.noteOff(`s${s}`, midi), delay + 1800);
+      // hp keys: audition voices must not clobber a real held note on
+      // the same string (s* keys belong to played notes).
+      setTimeout(() => this.app.synth.noteOn(`hp${s}`, midi, 92, +s), delay);
+      setTimeout(() => this.app.synth.noteOff(`hp${s}`, midi), delay + 1800);
     }
   }
 
