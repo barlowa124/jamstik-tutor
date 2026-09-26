@@ -77,13 +77,13 @@ sweep. You can also click frets on the board directly.
   and the panel previews the next chord. The clock runs until the held
   notes resolve to exactly the target's chord tones. Stats track switch
   times. Same four progressions as the trainer.
-- **Riff drills**: picking patterns, public-domain melodies, and original
-  exercises (15 total: blues shuffle, pentatonic walk-up, G run, travis
-  pick, power riff, ode to joy, when the saints, twinkle twinkle,
-  amazing grace, scarborough fair, drunken sailor, house of the rising
-  sun, spider climb, low e echo, open string waltz) judged one step at
-  a time. Completions report elapsed time against a per-song session
-  best.
+- **Riff drills**: a library of picking exercises and melodies judged
+  one step at a time. Exercises: blues shuffle, pentatonic walk-up,
+  G run, travis pick, power riff, spider climb, low e echo, open string
+  waltz. Public-domain tunes: ode to joy, when the saints, twinkle
+  twinkle, amazing grace, scarborough fair, drunken sailor, house of
+  the rising sun. Completions report elapsed time against a per-song
+  session best.
   The board lights the current position. Wrong notes coach the expected
   pitch and string but never reset your place. `hear it` auditions the
   pattern. In single-channel mode steps match by pitch.
