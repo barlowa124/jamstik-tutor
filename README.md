@@ -103,7 +103,7 @@ sweep. You can also click frets on the board directly.
   BPM, judged on release timing. *Intervals on board* lights a fret and
   asks for the note a named interval above it (m3 through P5).
   *Staff reading* shows a notehead on a treble staff and requires the
-  exact octave; miss feedback names the octave distance.
+  exact octave. Miss feedback names the octave distance.
   Stats shown: `hits/tries`, streak, average response seconds, a
   running `today` tally, and a 7-day total. Daily drill counts persist
   in `localStorage`, and the header shows a per-kind today line plus a
