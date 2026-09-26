@@ -82,7 +82,10 @@ sweep. You can also click frets on the board directly.
   half, or whole-step bend held on any string (±12 cents). *Arpeggio
   runs* draws a chord shape and times a low-to-high single-string pick.
   In single-channel mode it accepts all chord tones sounding together.
-  Stats shown: `hits/tries`, streak, average response seconds.
+  *Intervals by ear* plays two notes through the synth and you name the
+  interval from buttons, no guitar needed.
+  Stats shown: `hits/tries`, streak, average response seconds, and a
+  running `today` tally. Daily drill counts persist in `localStorage`.
 
 ## Sounds
 
@@ -137,10 +140,13 @@ proprietary sysex/BLE channel and are intentionally not reimplemented.
 ## Visualizations
 
 Waveform (time domain), spectrum (log-spaced FFT bars), scrolling
-spectrogram, the wavetable frames the synth uses, and a note waterfall:
-per-string lanes scrolling left over the last 12 seconds, each note a
-colored bar from attack to release so you can see your timing. Synth and
-real-input traces overlay in teal and pink.
+spectrogram, the wavetable frames the synth uses, a note waterfall, and
+a staff view. The waterfall scrolls per-string lanes left over the last
+12 seconds, each note a colored bar from attack to release, taller when
+hit harder. The staff notates held notes on treble clef with
+accidentals and ledger lines, so what you play shows up as standard
+notation in real time. Synth and real-input traces overlay in teal and
+pink.
 
 ## Layout
 

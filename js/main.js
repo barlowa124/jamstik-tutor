@@ -4,7 +4,7 @@ import { OPEN_MIDI, midiName, inferString, setTuning, setTuningValues, TUNINGS, 
 import { MidiEngine, VirtualJamstik, MidiRecorder, MidiPlayer, parseSmf } from './midi.js';
 import { SynthEngine, RealInput, Metronome, SessionRecorder, PRESETS, PRESET_CATS, VELOCITY_CURVES } from './audio.js';
 import { Fretboard } from './fretboard.js';
-import { drawScope, drawSpectrum, drawWavetable, drawWaterfall, Spectrogram } from './viz.js';
+import { drawScope, drawSpectrum, drawWavetable, drawWaterfall, drawStaff, Spectrogram } from './viz.js';
 import { FreePlay, ChordTrainer, ScaleDrill, Tuner, Quiz, ChordChanges } from './modes.js';
 
 const $ = id => document.getElementById(id);
@@ -79,6 +79,19 @@ function restoreSettings() {
   if (ui.fx_reverb) ui.fx_reverb.value = app.synth.fx.reverb * 100;
   if (ui.fx_master) ui.fx_master.value = app.synth.masterLevel * 100;
 }
+
+// Daily drill tallies, persisted so practice history survives reloads.
+app.bump = (kind, hit, lat) => {
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    const all = JSON.parse(localStorage.getItem('jamstik-tutor-stats') || '{}');
+    const k = (all[day] ??= {})[kind] ??= { h: 0, t: 0, lat: 0 };
+    k.t++;
+    if (hit) { k.h++; k.lat += lat; }
+    localStorage.setItem('jamstik-tutor-stats', JSON.stringify(all));
+    return k;
+  } catch { return null; }
+};
 
 const handlers = {
   onNoteOn(key, str, rawMidi, vel) {
@@ -479,6 +492,7 @@ function frame() {
   drawSpectrum($('spectrum'), [synthSrc, realSrc]);
   spectro.g.draw(app.synth.analyser);
   drawWaterfall($('waterfall'), app.history, app.held, performance.now());
+  drawStaff($('staff'), [...app.held.values()].map(n => n.midi));
   app.mode?.frame?.();
   requestAnimationFrame(frame);
 }

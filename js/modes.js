@@ -454,7 +454,8 @@ export class Quiz {
     const row = el('div', 'row');
     this.kindSel = el('select');
     for (const [v, label] of [['mixed', 'mixed drills'], ['note', 'note names'],
-      ['spot', 'exact positions'], ['bend', 'bend targets'], ['arp', 'arpeggio runs']]) {
+      ['spot', 'exact positions'], ['bend', 'bend targets'], ['arp', 'arpeggio runs'],
+      ['ear', 'intervals by ear']]) {
       this.kindSel.append(el('option', '', label));
       this.kindSel.lastChild.value = v;
     }
@@ -465,6 +466,20 @@ export class Quiz {
     this.verdict = el('div', 'verdict', '');
     this.stats = el('div', 'stats', '');
     panel.append(row, this.prompt, this.verdict, this.stats);
+    // Interval answer grid, only meaningful during ear targets.
+    this.IV_NAMES = ['minor 2nd', 'major 2nd', 'minor 3rd', 'major 3rd', 'perfect 4th',
+      'tritone', 'perfect 5th', 'minor 6th', 'major 6th', 'minor 7th', 'major 7th', 'octave'];
+    this.earRow = el('div', 'row');
+    this.earRow.style.display = 'none';
+    for (let iv = 1; iv <= 12; iv++) {
+      const b = el('button', 'chip', this.IV_NAMES[iv - 1].replace('perfect ', 'P').replace('major ', 'M').replace('minor ', 'm'));
+      b.onclick = () => this.answerEar(iv);
+      this.earRow.append(b);
+    }
+    const replay = el('button', '', '↻ hear again');
+    replay.onclick = () => this.playEar();
+    this.earRow.append(replay);
+    panel.append(this.earRow);
     panel.append(el('div', 'hint',
       'Note drills accept the pitch class on any string. Position drills ' +
       'need multi-channel MIDI — in single-channel mode they match pitch only.'));
@@ -475,9 +490,19 @@ export class Quiz {
 
   ask() {
     let kind = this.kindSel.value;
-    if (kind === 'mixed') kind = ['note', 'spot', 'bend', 'arp'][Math.floor(Math.random() * 4)];
+    if (kind === 'mixed') kind = ['note', 'spot', 'bend', 'arp', 'ear'][Math.floor(Math.random() * 5)];
     this.promptT = performance.now();
     this.app.fretboard.targets = null;
+    this.earRow.style.display = kind === 'ear' ? '' : 'none';
+    if (kind === 'ear') {
+      const iv = 1 + Math.floor(Math.random() * 12);
+      const base = 50 + Math.floor(Math.random() * 14);
+      this.target = { kind, iv, base };
+      this.prompt.textContent = 'which interval?';
+      this.playEar();
+      this.verdict.textContent = '';
+      return;
+    }
     if (kind === 'note') {
       this.target = { kind, pc: Math.floor(Math.random() * 12) };
       this.prompt.textContent = `play any ${pcName(this.target.pc)}`;
@@ -506,6 +531,7 @@ export class Quiz {
     this.score.hits++;
     this.score.streak++;
     this.score.latencies.push(lat);
+    this.today = this.app.bump?.('quiz', true, lat) ?? this.today;
     this.verdict.textContent = `✓ ${label} in ${lat.toFixed(1)}s`;
     this.verdict.style.color = '#34d399';
     this.showStats();
@@ -515,6 +541,7 @@ export class Quiz {
   miss(label) {
     this.score.tries++;
     this.score.streak = 0;
+    this.today = this.app.bump?.('quiz', false, 0) ?? this.today;
     this.verdict.textContent = label;
     this.verdict.style.color = '#f87171';
     this.showStats();
@@ -524,7 +551,8 @@ export class Quiz {
     const latArr = this.score.latencies;
     this.stats.textContent =
       `${this.score.hits}/${this.score.tries} · streak ${this.score.streak}` +
-      (latArr.length ? ` · avg ${(latArr.reduce((a, b) => a + b) / latArr.length).toFixed(1)}s` : '');
+      (latArr.length ? ` · avg ${(latArr.reduce((a, b) => a + b) / latArr.length).toFixed(1)}s` : '') +
+      (this.today ? ` · today ${this.today.h}/${this.today.t}` : '');
   }
 
   onNoteOn(str, midi) {
@@ -570,6 +598,30 @@ export class Quiz {
     const lat = (performance.now() - this.promptT) / 1000;
     if (ok) this.hit(lat, midiName(midi));
     else this.miss(`heard ${midiName(midi)} — try again`);
+  }
+
+  playEar() {
+    const t = this.target;
+    if (!t || t.kind !== 'ear') return;
+    this.app.synth.ensure();
+    const play = (midi, at, dur) => {
+      setTimeout(() => this.app.synth.noteOn('ear', midi, 92, null), at);
+      setTimeout(() => this.app.synth.noteOff('ear', midi), at + dur);
+    };
+    play(t.base, 0, 800);
+    play(t.base + t.iv, 650, 1000);
+  }
+
+  answerEar(iv) {
+    const t = this.target;
+    if (!t || t.kind !== 'ear' || t.done) return;
+    const lat = (performance.now() - this.promptT) / 1000;
+    if (iv === t.iv) {
+      t.done = true;
+      this.hit(lat, this.IV_NAMES[t.iv - 1]);
+    } else {
+      this.miss(`that was a ${this.IV_NAMES[iv - 1]} — listen again`);
+    }
   }
 
   onBend(str, semis) {
@@ -642,11 +694,13 @@ export class ChordChanges {
     if (gap?.exact) {
       const dt = (performance.now() - this.promptT) / 1000;
       this.times.push(dt);
+      const today = this.app.bump?.('changes', true, dt);
       this.verdict.textContent = `${this.cur} in ${dt.toFixed(1)}s`;
       this.verdict.style.color = '#34d399';
       const avg = this.times.reduce((a, b) => a + b) / this.times.length;
       this.stats.textContent =
-        `${this.times.length} changes · last ${this.times.slice(-4).map(t => t.toFixed(1)).join('s, ')}s · avg ${avg.toFixed(1)}s`;
+        `${this.times.length} changes · last ${this.times.slice(-4).map(t => t.toFixed(1)).join('s, ')}s · avg ${avg.toFixed(1)}s` +
+        (today ? ` · today ${today.h}/${today.t}` : '');
       this.done = true;
       this.ix++;
       setTimeout(() => this.ask(), 350);
