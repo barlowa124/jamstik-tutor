@@ -5,6 +5,7 @@ import {
   CHORD_SHAPES, chordFromLabel, chordGap, detectChord, currentTuningName,
   midiName, OPEN_MIDI, pcName, SCALES, scalePositions, scaleRun, STRING_NAMES,
 } from './theory.js';
+import { Metronome } from './audio.js';
 
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -712,4 +713,185 @@ export class ChordChanges {
   }
 
   onNoteOn() {}
+}
+
+// Short melodic patterns judged note by note. Single-string steps only:
+// power chords and double-stops would need a chord-step verdict layer.
+const RIFFS = {
+  'blues shuffle in A': [[5, 0], [4, 0], [4, 2], [4, 0], [4, 4], [4, 0], [4, 2], [4, 0]],
+  'pentatonic walk-up in A': [[5, 0], [4, 2], [4, 0], [3, 2], [3, 0], [4, 0], [5, 3], [5, 0]],
+  'G run walk-down': [[6, 3], [5, 0], [5, 2], [4, 0]],
+  'travis pick in C': [[5, 3], [3, 0], [4, 2], [3, 0], [6, 3], [3, 0], [4, 2], [3, 0]],
+  'power riff in E': [[6, 0], [6, 0], [6, 3], [6, 0], [5, 5], [5, 7]],
+};
+
+export class RiffDrill {
+  constructor(app) { this.app = app; }
+
+  activate(panel) {
+    panel.innerHTML = '';
+    panel.append(el('h2', '', 'riff drills'));
+    const row = el('div', 'row');
+    this.sel = el('select');
+    for (const k of Object.keys(RIFFS)) this.sel.append(el('option', '', k));
+    this.sel.onchange = () => this.reset();
+    const hear = el('button', '', 'hear it');
+    hear.onclick = () => this.playRiff();
+    row.append(this.sel, hear);
+    this.prompt = el('div', 'prompt');
+    this.verdict = el('div', 'verdict');
+    this.stats = el('div', 'stats');
+    panel.append(row, this.prompt, this.verdict, this.stats);
+    panel.append(el('div', 'hint',
+      'Play the lit position, then the next. Wrong notes cost a miss but ' +
+      'never your place in the pattern.'));
+    this.reset();
+  }
+
+  deactivate() { this.app.fretboard.targets = null; }
+
+  reset() {
+    this.ix = 0;
+    this.t0 = performance.now();
+    this.hits = 0;
+    this.misses = 0;
+    this.verdict.textContent = '';
+    this.showStep();
+  }
+
+  showStep() {
+    const steps = RIFFS[this.sel.value];
+    const [str, fret] = steps[this.ix];
+    this.app.fretboard.targets = { [str]: fret };
+    this.prompt.textContent =
+      `${this.ix + 1}/${steps.length} · ${STRING_NAMES[str]} string fret ${fret} (${midiName(OPEN_MIDI[str] + fret)})`;
+    this.stats.textContent = `${this.hits} clean · ${this.misses} off`;
+  }
+
+  playRiff() {
+    this.app.synth.ensure();
+    const steps = RIFFS[this.sel.value];
+    steps.forEach(([str, fret], i) => {
+      const midi = OPEN_MIDI[str] + fret;
+      setTimeout(() => this.app.synth.noteOn(`rf${i}`, midi, 90, str), i * 260);
+      setTimeout(() => this.app.synth.noteOff(`rf${i}`, midi), i * 260 + 230);
+    });
+  }
+
+  onNoteOn(str, midi) {
+    const steps = RIFFS[this.sel.value];
+    const [wStr, wFret] = steps[this.ix];
+    const wantMidi = OPEN_MIDI[wStr] + wFret;
+    const held = this.app.held.get(`s${str}`) || [...this.app.held.values()].find(n => n.midi === midi);
+    const exact = held && !held.inferred ? str === wStr && midi === wantMidi : midi === wantMidi;
+    if (exact) {
+      this.hits++;
+      this.ix++;
+      this.verdict.textContent = `${midiName(midi)} ✓`;
+      this.verdict.style.color = '#34d399';
+      if (this.ix >= steps.length) {
+        const dt = (performance.now() - this.t0) / 1000;
+        this.verdict.textContent =
+          `riff complete — ${this.hits}/${this.hits + this.misses} in ${dt.toFixed(1)}s`;
+        this.app.bump?.('riffs', this.misses === 0, dt);
+        this.ix = 0;
+        this.t0 = performance.now();
+        this.hits = 0;
+        this.misses = 0;
+      }
+      this.showStep();
+      return;
+    }
+    this.misses++;
+    const samePc = ((midi - wantMidi) % 12 + 12) % 12 === 0;
+    this.verdict.textContent = samePc
+      ? `right pitch, wrong spot — ${STRING_NAMES[wStr]} fret ${wFret}`
+      : `heard ${midiName(midi)} — expected ${midiName(wantMidi)}`;
+    this.verdict.style.color = '#f87171';
+    this.stats.textContent = `${this.hits} clean · ${this.misses} off`;
+  }
+}
+
+// Strum on the beat against a click; each onset is scored by its
+// distance to the nearest beat on the grid.
+export class RhythmDrill {
+  constructor(app) { this.app = app; }
+
+  activate(panel) {
+    panel.innerHTML = '';
+    panel.append(el('h2', '', 'rhythm drill'));
+    const row = el('div', 'row');
+    this.btn = el('button', '', '▶ start click');
+    this.btn.onclick = () => this.running ? this.stop() : this.start();
+    this.subSel = el('select');
+    for (const [v, l] of [['1', 'quarter notes'], ['2', 'eighth notes']]) {
+      const o = el('option', '', l);
+      o.value = v;
+      this.subSel.append(o);
+    }
+    row.append(this.btn, this.subSel);
+    this.verdict = el('div', 'verdict');
+    this.stats = el('div', 'stats');
+    panel.append(row, this.verdict, this.stats);
+    panel.append(el('div', 'hint',
+      'Hit any note in time with the click. Offsets under 70ms score on-beat. ' +
+      'Change BPM in the header.'));
+    this.running = false;
+    this.offs = [];
+  }
+
+  start() {
+    this.app.synth.ensure();
+    this.metro = this.metro || new Metronome(this.app.synth.ctx);
+    this.metro.bpm = +document.getElementById('bpm').value || 80;
+    this.beatTimes = [];
+    this.metro.onTick = (b, t) => {
+      const wall = performance.now() + (t - this.app.synth.ctx.currentTime) * 1000;
+      this.beatTimes.push(wall);
+      if (this.beatTimes.length > 16) this.beatTimes.shift();
+    };
+    this.metro.start();
+    this.running = true;
+    this.btn.textContent = '■ stop click';
+    this.verdict.textContent = 'on the click —';
+    this.verdict.style.color = '#94a3b8';
+  }
+
+  stop() {
+    this.metro?.stop();
+    this.running = false;
+    this.btn.textContent = '▶ start click';
+    this.verdict.textContent = '';
+  }
+
+  deactivate() { this.stop(); }
+
+  onNoteOn() {
+    if (!this.running || !this.beatTimes?.length) return;
+    const now = performance.now();
+    const div = +this.subSel.value;
+    // Header BPM is live-editable: keep click tempo and grid in sync.
+    this.metro.bpm = +document.getElementById('bpm').value || this.metro.bpm;
+    const period = (60000 / this.metro.bpm) / div;
+    // Nearest grid point: beats plus subdivisions between consecutive beats.
+    let best = null;
+    for (const bt of this.beatTimes) {
+      for (let k = 0; k < div; k++) {
+        const d = now - (bt + k * period);
+        if (Math.abs(d) < Math.abs(best ?? Infinity)) best = d;
+      }
+    }
+    if (best === null) return;
+    const off = Math.round(best);
+    const onBeat = Math.abs(off) <= 70;
+    this.offs.push(off);
+    if (this.offs.length > 24) this.offs.shift();
+    this.verdict.textContent = onBeat ? 'on the beat ✓' : `${Math.abs(off)}ms ${off > 0 ? 'late' : 'early'}`;
+    this.verdict.style.color = onBeat ? '#34d399' : '#fbbf24';
+    const avg = this.offs.reduce((a, b) => a + b) / this.offs.length;
+    const hits = this.offs.filter(o => Math.abs(o) <= 70).length;
+    this.stats.textContent =
+      `${hits}/${this.offs.length} on-beat · avg ${avg >= 0 ? '+' : ''}${avg.toFixed(0)}ms ` +
+      `(${avg > 8 ? 'dragging' : avg < -8 ? 'pushing ahead' : 'centered'})`;
+  }
 }

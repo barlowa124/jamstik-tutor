@@ -5,7 +5,7 @@ import { MidiEngine, VirtualJamstik, MidiRecorder, MidiPlayer, parseSmf } from '
 import { SynthEngine, RealInput, Metronome, SessionRecorder, PRESETS, PRESET_CATS, VELOCITY_CURVES } from './audio.js';
 import { Fretboard } from './fretboard.js';
 import { drawScope, drawSpectrum, drawWavetable, drawWaterfall, drawStaff, Spectrogram } from './viz.js';
-import { FreePlay, ChordTrainer, ScaleDrill, Tuner, Quiz, ChordChanges } from './modes.js';
+import { FreePlay, ChordTrainer, ScaleDrill, Tuner, Quiz, ChordChanges, RiffDrill, RhythmDrill } from './modes.js';
 
 const $ = id => document.getElementById(id);
 
@@ -206,7 +206,7 @@ function fillDeviceList(inputs) {
 }
 
 // ── Modes ───────────────────────────────────────────────────────────────
-const MODES = { free: FreePlay, chords: ChordTrainer, scales: ScaleDrill, tuner: Tuner, quiz: Quiz, changes: ChordChanges };
+const MODES = { free: FreePlay, chords: ChordTrainer, scales: ScaleDrill, riffs: RiffDrill, rhythm: RhythmDrill, tuner: Tuner, quiz: Quiz, changes: ChordChanges };
 
 function setMode(name) {
   app.mode?.deactivate?.();

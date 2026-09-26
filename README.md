@@ -74,6 +74,15 @@ sweep. You can also click frets on the board directly.
   and the panel previews the next chord. The clock runs until the held
   notes resolve to exactly the target's chord tones. Stats track switch
   times. Same four progressions as the trainer.
+- **Riff drills**: short picking patterns (blues shuffle, pentatonic
+  walk-up, G run, travis pick, power riff) judged one step at a time.
+  The board lights the current position. Wrong notes coach the expected
+  pitch and string but never reset your place. `hear it` auditions the
+  pattern. In single-channel mode steps match by pitch.
+- **Rhythm drill**: strum on the click. Each onset is scored against
+  the beat grid (quarter or eighth notes). Under 70ms counts on-beat,
+  otherwise you see the signed offset in ms and a running average
+  labeled dragging, pushing ahead, or centered.
 - **Quiz**: fretboard-knowledge drills. *Note names* asks for a pitch
   class anywhere ("play any F#"). *Exact positions* asks for a
   string/fret pair. With multi-channel MIDI it checks string and fret.
