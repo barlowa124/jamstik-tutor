@@ -493,6 +493,15 @@ function frame() {
   spectro.g.draw(app.synth.analyser);
   drawWaterfall($('waterfall'), app.history, app.held, performance.now());
   drawStaff($('staff'), [...app.held.values()].map(n => n.midi));
+  // Session tally, refreshed ~once a second.
+  if ((frame.n = (frame.n || 0) + 1) % 60 === 0) {
+    try {
+      const all = JSON.parse(localStorage.getItem('jamstik-tutor-stats') || '{}');
+      const day = all[new Date().toISOString().slice(0, 10)] || {};
+      const parts = Object.entries(day).map(([k, v]) => `${k} ${v.h}/${v.t}`);
+      $('session').textContent = parts.length ? `today: ${parts.join(' · ')}` : '';
+    } catch { /* storage unavailable */ }
+  }
   app.mode?.frame?.();
   requestAnimationFrame(frame);
 }

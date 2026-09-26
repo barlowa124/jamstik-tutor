@@ -98,6 +98,12 @@ sweep. You can also click frets on the board directly.
   interval from buttons, no guitar needed. *Chords by ear* plays a
   triad answered by quality (major / minor / dominant 7th). *Dynamics*
   prompts for a pick velocity band and scores the MIDI velocity.
+  *Hold duration* asks for a note held one whole note at the header
+  BPM, judged on release timing. *Intervals on board* lights a fret and
+  asks for the note a named interval above it (m3 through P5).
+  Stats shown: `hits/tries`, streak, average response seconds, a
+  running `today` tally, and a 7-day total. Daily drill counts persist
+  in `localStorage`, and the header shows a per-kind today line.
   Stats shown: `hits/tries`, streak, average response seconds, a
   running `today` tally, and a 7-day total. Daily drill counts persist
   in `localStorage`.

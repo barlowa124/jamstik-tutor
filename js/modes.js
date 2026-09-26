@@ -460,7 +460,8 @@ export class Quiz {
     this.kindSel = el('select');
     for (const [v, label] of [['mixed', 'mixed drills'], ['note', 'note names'],
       ['spot', 'exact positions'], ['bend', 'bend targets'], ['arp', 'arpeggio runs'],
-      ['dyn', 'dynamics'], ['ear', 'intervals by ear'], ['cear', 'chords by ear']]) {
+      ['dyn', 'dynamics'], ['hold', 'hold duration'], ['ivb', 'intervals on board'],
+      ['ear', 'intervals by ear'], ['cear', 'chords by ear']]) {
       this.kindSel.append(el('option', '', label));
       this.kindSel.lastChild.value = v;
     }
@@ -508,7 +509,7 @@ export class Quiz {
   ask() {
     let kind = this.kindSel.value;
     if (kind === 'mixed') {
-      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'ear', 'cear'][Math.floor(Math.random() * 7)];
+      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'ear', 'cear'][Math.floor(Math.random() * 9)];
     }
     this.promptT = performance.now();
     this.app.fretboard.targets = null;
@@ -531,6 +532,27 @@ export class Quiz {
       const [name, lo, hi] = [['a soft note', 1, 54], ['a medium note', 55, 99], ['a hard note', 100, 127]][Math.floor(Math.random() * 3)];
       this.target = { kind, name, lo, hi };
       this.prompt.textContent = `play ${name}`;
+      this.verdict.textContent = '';
+      return;
+    }
+    if (kind === 'hold') {
+      const pc = Math.floor(Math.random() * 12);
+      const bpm = +document.getElementById('bpm').value || 80;
+      this.target = { kind, pc, beats: 4, ms: 4 * 60000 / bpm };
+      this.holdMidi = null;
+      this.holdT = 0;
+      this.prompt.textContent = `hold any ${pcName(pc)} for a whole note (${Math.round(this.target.ms)}ms at ${bpm}bpm)`;
+      this.verdict.textContent = '';
+      return;
+    }
+    if (kind === 'ivb') {
+      const str = 1 + Math.floor(Math.random() * 6);
+      const fret = 1 + Math.floor(Math.random() * 7);
+      const [iv, name] = [[3, 'minor 3rd'], [4, 'major 3rd'], [7, 'perfect 5th']][Math.floor(Math.random() * 3)];
+      const base = OPEN_MIDI[str] + fret;
+      this.target = { kind, str, fret, iv, pc: ((base + iv) % 12 + 12) % 12 };
+      this.app.fretboard.targets = { [str]: fret };
+      this.prompt.textContent = `play a ${name} above the lit ${midiName(base)}`;
       this.verdict.textContent = '';
       return;
     }
@@ -628,6 +650,24 @@ export class Quiz {
       return;
     }
     let ok = false;
+    if (t.kind === 'hold') {
+      if (((midi % 12) + 12) % 12 === t.pc) {
+        this.holdMidi = midi;
+        this.holdT = performance.now();
+        this.verdict.textContent = 'holding… release on the count';
+        this.verdict.style.color = '#5eead4';
+      } else {
+        this.miss(`heard ${midiName(midi)} — need a ${pcName(t.pc)} to hold`);
+      }
+      return;
+    }
+    if (t.kind === 'ivb') {
+      ok = ((midi % 12) + 12) % 12 === t.pc;
+      const lat = (performance.now() - this.promptT) / 1000;
+      if (ok) this.hit(lat, midiName(midi));
+      else this.miss(`heard ${midiName(midi)} — the lit note plus ${t.iv} steps`);
+      return;
+    }
     if (t.kind === 'dyn') {
       ok = vel >= t.lo && vel <= t.hi;
       const lat = (performance.now() - this.promptT) / 1000;
@@ -686,6 +726,22 @@ export class Quiz {
       this.hit(lat, this.IV_NAMES[t.iv - 1]);
     } else {
       this.miss(`that was a ${this.IV_NAMES[iv - 1]} — listen again`);
+    }
+  }
+
+  onNoteOff(str, midi) {
+    const t = this.target;
+    if (!t || t.kind !== 'hold' || this.holdMidi === null || midi !== this.holdMidi) return;
+    const held = performance.now() - this.holdT;
+    this.holdMidi = null;
+    const err = held - t.ms;
+    const lat = (performance.now() - this.promptT) / 1000;
+    if (Math.abs(err) <= Math.max(350, t.ms * 0.2)) {
+      t.done = true;
+      this.hit(lat, `held ${(held / 1000).toFixed(1)}s`);
+    } else {
+      this.miss(`held ${(held / 1000).toFixed(1)}s — ${err > 0 ? 'over' : 'short'} by ${(Math.abs(err) / 1000).toFixed(1)}s`);
+      this.holdT = 0;
     }
   }
 
