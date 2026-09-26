@@ -499,7 +499,11 @@ function frame() {
       const all = JSON.parse(localStorage.getItem('jamstik-tutor-stats') || '{}');
       const day = all[new Date().toISOString().slice(0, 10)] || {};
       const parts = Object.entries(day).map(([k, v]) => `${k} ${v.h}/${v.t}`);
-      $('session').textContent = parts.length ? `today: ${parts.join(' · ')}` : '';
+      let streak = 0;
+      const d = new Date();
+      while (all[d.toISOString().slice(0, 10)]) { streak++; d.setDate(d.getDate() - 1); }
+      const suffix = streak >= 2 ? ` · ${streak}-day streak` : '';
+      $('session').textContent = parts.length ? `today: ${parts.join(' · ')}${suffix}` : '';
     } catch { /* storage unavailable */ }
   }
   app.mode?.frame?.();

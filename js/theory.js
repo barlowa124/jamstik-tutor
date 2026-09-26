@@ -199,6 +199,8 @@ export function scaleSet(rootPc, scaleName) {
 }
 
 // All (string, fret) positions that produce scale tones within FRET_COUNT.
+const DEG_NAMES = ['R', 'b2', '2', 'b3', '3', '4', '#4', '5', 'b6', '6', 'b7', '7'];
+
 export function scalePositions(rootPc, scaleName) {
   const s = scaleSet(rootPc, scaleName);
   if (!s) return [];
@@ -206,7 +208,8 @@ export function scalePositions(rootPc, scaleName) {
   for (let str = 1; str <= STRING_COUNT; str++) {
     for (let f = 0; f <= FRET_COUNT; f++) {
       const pc = (OPEN_MIDI[str] + f) % 12;
-      if (s.has(pc)) out.push({ string: str, fret: f, pc, isRoot: pc === rootPc });
+      if (s.has(pc)) out.push({ string: str, fret: f, pc, isRoot: pc === rootPc,
+        deg: DEG_NAMES[(pc - rootPc + 12) % 12] });
     }
   }
   return out;

@@ -6,6 +6,7 @@ import {
   midiName, OPEN_MIDI, pcName, SCALES, scalePositions, scaleRun, STRING_NAMES,
 } from './theory.js';
 import { Metronome } from './audio.js';
+import { drawStaff } from './viz.js';
 
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -461,6 +462,7 @@ export class Quiz {
     for (const [v, label] of [['mixed', 'mixed drills'], ['note', 'note names'],
       ['spot', 'exact positions'], ['bend', 'bend targets'], ['arp', 'arpeggio runs'],
       ['dyn', 'dynamics'], ['hold', 'hold duration'], ['ivb', 'intervals on board'],
+      ['read', 'staff reading'],
       ['ear', 'intervals by ear'], ['cear', 'chords by ear']]) {
       this.kindSel.append(el('option', '', label));
       this.kindSel.lastChild.value = v;
@@ -497,7 +499,9 @@ export class Quiz {
     const replay2 = el('button', '', '↻ hear again');
     replay2.onclick = () => this.playEar();
     this.cearRow.append(replay2);
-    panel.append(this.earRow, this.cearRow);
+    this.staffCv = el('canvas', 'quiz-staff');
+    this.staffCv.style.display = 'none';
+    panel.append(this.earRow, this.cearRow, this.staffCv);
     panel.append(el('div', 'hint',
       'Note drills accept the pitch class on any string. Position drills ' +
       'need multi-channel MIDI — in single-channel mode they match pitch only.'));
@@ -509,12 +513,13 @@ export class Quiz {
   ask() {
     let kind = this.kindSel.value;
     if (kind === 'mixed') {
-      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'ear', 'cear'][Math.floor(Math.random() * 9)];
+      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'read', 'ear', 'cear'][Math.floor(Math.random() * 10)];
     }
     this.promptT = performance.now();
     this.app.fretboard.targets = null;
     this.earRow.style.display = kind === 'ear' ? '' : 'none';
     this.cearRow.style.display = kind === 'cear' ? '' : 'none';
+    this.staffCv.style.display = 'none';
     if (kind === 'ear' || kind === 'cear') {
       if (kind === 'ear') {
         this.target = { kind, iv: 1 + Math.floor(Math.random() * 12), base: 50 + Math.floor(Math.random() * 14) };
@@ -553,6 +558,15 @@ export class Quiz {
       this.target = { kind, str, fret, iv, pc: ((base + iv) % 12 + 12) % 12 };
       this.app.fretboard.targets = { [str]: fret };
       this.prompt.textContent = `play a ${name} above the lit ${midiName(base)}`;
+      this.verdict.textContent = '';
+      return;
+    }
+    if (kind === 'read') {
+      const midi = 60 + Math.floor(Math.random() * 24); // C4–C6 written range
+      this.target = { kind, midi };
+      this.staffCv.style.display = 'block';
+      drawStaff(this.staffCv, [midi]);
+      this.prompt.textContent = 'play the written note (exact octave)';
       this.verdict.textContent = '';
       return;
     }
@@ -666,6 +680,17 @@ export class Quiz {
       const lat = (performance.now() - this.promptT) / 1000;
       if (ok) this.hit(lat, midiName(midi));
       else this.miss(`heard ${midiName(midi)} — the lit note plus ${t.iv} steps`);
+      return;
+    }
+    if (t.kind === 'read') {
+      ok = midi === t.midi;
+      const lat = (performance.now() - this.promptT) / 1000;
+      if (ok) this.hit(lat, midiName(midi));
+      else {
+        const octDiff = Math.round((midi - t.midi) / 12);
+        this.miss(octDiff ? `heard ${midiName(midi)} — ${Math.abs(octDiff)} octave${Math.abs(octDiff) > 1 ? 's' : ''} ${octDiff > 0 ? 'high' : 'low'}`
+          : `heard ${midiName(midi)} — read the staff again`);
+      }
       return;
     }
     if (t.kind === 'dyn') {

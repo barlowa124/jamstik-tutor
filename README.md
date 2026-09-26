@@ -104,9 +104,6 @@ sweep. You can also click frets on the board directly.
   Stats shown: `hits/tries`, streak, average response seconds, a
   running `today` tally, and a 7-day total. Daily drill counts persist
   in `localStorage`, and the header shows a per-kind today line.
-  Stats shown: `hits/tries`, streak, average response seconds, a
-  running `today` tally, and a 7-day total. Daily drill counts persist
-  in `localStorage`.
 
 ## Sounds
 

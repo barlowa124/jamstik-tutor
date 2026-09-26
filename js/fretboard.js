@@ -100,6 +100,12 @@ export class Fretboard {
         g.arc(x, y, 6, 0, 7);
         g.fillStyle = p.isRoot ? 'rgba(94,234,212,0.35)' : 'rgba(96,140,255,0.22)';
         g.fill();
+        if (p.deg) {
+          g.fillStyle = p.isRoot ? '#5eead4' : '#7fa6ff';
+          g.font = '8px sans-serif';
+          g.textAlign = 'center';
+          g.fillText(p.deg, x, y - 9);
+        }
       }
     }
 
