@@ -146,3 +146,47 @@ export class VirtualJamstik {
     }
   }
 }
+
+// Records note events and exports a Standard MIDI File (format 0,
+// 480 PPQ, 120 BPM) for dropping into any DAW.
+export class MidiRecorder {
+  constructor() { this.events = []; this.t0 = null; }
+  get running() { return this.t0 !== null; }
+
+  start() { this.events = []; this.t0 = performance.now(); }
+
+  add(on, ch, midi, vel) {
+    if (!this.running) return;
+    this.events.push({ ms: performance.now() - this.t0, on, ch: Math.max(0, Math.min(15, ch)), midi, vel });
+  }
+
+  stop() {
+    this.t0 = null;
+    return buildSmf(this.events);
+  }
+}
+
+function varLen(n) {
+  const b = [n & 0x7f];
+  while ((n >>= 7)) b.unshift((n & 0x7f) | 0x80);
+  return b;
+}
+
+function buildSmf(events) {
+  const TPQ = 480, BPM = 120;
+  const msToTicks = ms => Math.round(ms * (BPM / 60000) * TPQ);
+  const evs = [...events].sort((a, b) => a.ms - b.ms);
+  const track = [0x00, 0xff, 0x51, 0x03, 0x07, 0xa1, 0x20]; // tempo 500000us/qn
+  let last = 0;
+  for (const e of evs) {
+    const t = msToTicks(e.ms);
+    track.push(...varLen(Math.max(0, t - last)));
+    last = t;
+    track.push((e.on ? 0x90 : 0x80) | e.ch, e.midi & 0x7f, e.vel & 0x7f);
+  }
+  track.push(0x00, 0xff, 0x2f, 0x00);
+  const head = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, TPQ >> 8, TPQ & 0xff,
+                0x4d, 0x54, 0x72, 0x6b, (track.length >> 24) & 0xff, (track.length >> 16) & 0xff,
+                (track.length >> 8) & 0xff, track.length & 0xff];
+  return new Uint8Array([...head, ...track]);
+}

@@ -1,19 +1,21 @@
 // App wiring: state, mode dispatch, render loop, device management.
 
 import { OPEN_MIDI, midiName, inferString, setTuning, TUNINGS, currentTuningName } from './theory.js';
-import { MidiEngine, VirtualJamstik } from './midi.js';
+import { MidiEngine, VirtualJamstik, MidiRecorder } from './midi.js';
 import { SynthEngine, RealInput, Metronome, SessionRecorder, PRESETS, PRESET_CATS, VELOCITY_CURVES } from './audio.js';
 import { Fretboard } from './fretboard.js';
-import { drawScope, drawSpectrum, drawWavetable, Spectrogram } from './viz.js';
-import { FreePlay, ChordTrainer, ScaleDrill, Tuner } from './modes.js';
+import { drawScope, drawSpectrum, drawWavetable, drawWaterfall, Spectrogram } from './viz.js';
+import { FreePlay, ChordTrainer, ScaleDrill, Tuner, Quiz } from './modes.js';
 
 const $ = id => document.getElementById(id);
 
 const app = {
   held: new Map(), // voiceKey -> {str, midi, vel, bend, inferred}
+  history: [],     // {key, str, midi, t0, t1|null, inferred} for the waterfall
   synth: new SynthEngine(),
   real: new RealInput(),
   recorder: null,
+  midiRec: null,
   fretboard: null,
   source: null,    // MidiEngine | VirtualJamstik
   mode: null,
@@ -37,6 +39,9 @@ const handlers = {
       inferred = true;
     }
     app.held.set(key, { str, midi, rawMidi, vel, bend: 0, inferred });
+    app.history.push({ key, str, midi, vel, t0: performance.now(), t1: null, inferred });
+    if (app.history.length > 2000) app.history.shift();
+    app.midiRec?.add(true, str - 1, midi, vel);
     app.synth.noteOn(key, midi, vel, str);
     app.fretboard.active.set(str, { midi, bend: 0 });
     app.mode?.onNoteOn?.(str, midi);
@@ -57,12 +62,17 @@ const handlers = {
     if (!n) return;
     app.fretboard.active.delete(n.str);
     app.held.delete(k);
+    const open = [...app.history].reverse().find(e => e.key === k && e.t1 === null);
+    if (open) open.t1 = performance.now();
+    app.midiRec?.add(false, (n.str - 1), n.midi, 64);
     app.synth.noteOff(k, n.midi); // stored pitch -> the guard always passes
     app.mode?.onNoteOff?.(n.str ?? str, n.midi);
     app.mode?.onNotesChange?.();
     logMidi(`off s${n.str} ${midiName(n.midi)}`);
   },
   onAllOff() {
+    const now = performance.now();
+    for (const e of app.history) if (e.t1 === null) e.t1 = now;
     app.held.clear();
     app.fretboard.active.clear();
     app.synth.allOff();
@@ -126,7 +136,7 @@ function fillDeviceList(inputs) {
 }
 
 // ── Modes ───────────────────────────────────────────────────────────────
-const MODES = { free: FreePlay, chords: ChordTrainer, scales: ScaleDrill, tuner: Tuner };
+const MODES = { free: FreePlay, chords: ChordTrainer, scales: ScaleDrill, tuner: Tuner, quiz: Quiz };
 
 function setMode(name) {
   app.mode?.deactivate?.();
@@ -257,6 +267,7 @@ function buildSoundsPanel() {
       b.onclick = () => {
         app.synth.setPreset(name, picked.size ? [...picked] : null);
         drawWavetable($('wavetable'), app.synth);
+        drawWaterfall($('waterfall'), app.history, app.held, performance.now());
         for (const c of chips.children) c.classList.remove('on');
         picked.clear();
       };
@@ -290,8 +301,22 @@ function buildSoundsPanel() {
     if (!app.recorder.running) { app.recorder.start(); rec.textContent = '■ recording…'; }
     else { await app.recorder.stop(); rec.textContent = '⏺ record'; }
   };
+  const midRec = el('button', '', '⏺ .mid');
+  midRec.onclick = () => {
+    app.midiRec ??= new MidiRecorder();
+    if (!app.midiRec.running) { app.midiRec.start(); midRec.textContent = '■ midi…'; }
+    else {
+      const blob = new Blob([app.midiRec.stop()], { type: 'audio/midi' });
+      const a = el('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `jamstik-${Date.now()}.mid`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      midRec.textContent = '⏺ .mid';
+    }
+  };
   p.append(el('div', 'cat-label', 'capture'));
-  p.append(rec);
+  p.append(rec, midRec);
 }
 
 // ── Render loop ─────────────────────────────────────────────────────────
@@ -304,6 +329,7 @@ function frame() {
   drawScope($('scope'), [synthSrc, realSrc]);
   drawSpectrum($('spectrum'), [synthSrc, realSrc]);
   spectro.g.draw(app.synth.analyser);
+  drawWaterfall($('waterfall'), app.history, app.held, performance.now());
   app.mode?.frame?.();
   requestAnimationFrame(frame);
 }

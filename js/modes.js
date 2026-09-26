@@ -3,7 +3,7 @@
 
 import {
   CHORD_SHAPES, chordFromLabel, chordGap, detectChord, currentTuningName,
-  midiName, OPEN_MIDI, SCALES, scalePositions, scaleRun, STRING_NAMES,
+  midiName, OPEN_MIDI, pcName, SCALES, scalePositions, scaleRun, STRING_NAMES,
 } from './theory.js';
 
 const el = (tag, cls, text) => {
@@ -361,4 +361,85 @@ export class Tuner {
       ` · ${cents >= 0 ? '+' : ''}${cents.toFixed(0)} cents` +
       (entry.inferred ? ' · position inferred' : '');
   }
+}
+
+// ── Note quiz ───────────────────────────────────────────────────────────
+// Fretboard-knowledge drills: "play any F#" or "play fret 7 on the D
+// string". Tracks latency and streaks.
+export class Quiz {
+  constructor(app) { this.app = app; }
+
+  activate(panel) {
+    this.app.fretboard.targets = null;
+    this.app.fretboard.scaleOverlay = null;
+    this.score = { tries: 0, hits: 0, streak: 0, latencies: [] };
+    const row = el('div', 'row');
+    this.kindSel = el('select');
+    for (const [v, label] of [['mixed', 'mixed drills'], ['note', 'note names'], ['spot', 'exact positions']]) {
+      this.kindSel.append(el('option', '', label));
+      this.kindSel.lastChild.value = v;
+    }
+    const skip = el('button', '', 'skip');
+    skip.onclick = () => this.ask();
+    row.append(this.kindSel, skip);
+    this.prompt = el('div', 'big-readout', '');
+    this.verdict = el('div', 'verdict', '');
+    this.stats = el('div', 'stats', '');
+    panel.append(row, this.prompt, this.verdict, this.stats);
+    panel.append(el('div', 'hint',
+      'Note drills accept the pitch class on any string. Position drills ' +
+      'need multi-channel MIDI — in single-channel mode they match pitch only.'));
+    this.ask();
+  }
+
+  deactivate() {}
+
+  ask() {
+    const kinds = { note: true, spot: true };
+    let kind = this.kindSel.value;
+    if (kind === 'mixed') kind = Math.random() < 0.5 ? 'note' : 'spot';
+    this.promptT = performance.now();
+    if (kind === 'note') {
+      this.target = { kind, pc: Math.floor(Math.random() * 12) };
+      this.prompt.textContent = `play any ${pcName(this.target.pc)}`;
+    } else {
+      const str = 1 + Math.floor(Math.random() * 6);
+      const fret = Math.floor(Math.random() * 8);
+      this.target = { kind, str, fret, midi: OPEN_MIDI[str] + fret };
+      this.prompt.textContent = `play fret ${fret} on the ${STRING_NAMES[str]} string`;
+    }
+    this.verdict.textContent = '';
+  }
+
+  onNoteOn(str, midi) {
+    const t = this.target;
+    if (!t) return;
+    let ok = false;
+    if (t.kind === 'note') {
+      ok = ((midi % 12) + 12) % 12 === t.pc;
+    } else {
+      const held = this.app.held.get(`s${str}`) || [...this.app.held.values()].find(n => n.midi === midi);
+      ok = held && !held.inferred ? str === t.str && midi === t.midi : midi === t.midi;
+    }
+    const lat = (performance.now() - this.promptT) / 1000;
+    this.score.tries++;
+    if (ok) {
+      this.score.hits++;
+      this.score.streak++;
+      this.score.latencies.push(lat);
+      this.verdict.textContent = `✓ ${midiName(midi)} in ${lat.toFixed(1)}s`;
+      this.verdict.style.color = '#34d399';
+      setTimeout(() => this.ask(), 700);
+    } else {
+      this.score.streak = 0;
+      this.verdict.textContent = `heard ${midiName(midi)} — try again`;
+      this.verdict.style.color = '#f87171';
+    }
+    const latArr = this.score.latencies;
+    this.stats.textContent =
+      `${this.score.hits}/${this.score.tries} · streak ${this.score.streak}` +
+      (latArr.length ? ` · avg ${(latArr.reduce((a, b) => a + b) / latArr.length).toFixed(1)}s` : '');
+  }
+
+  onNotesChange() {}
 }

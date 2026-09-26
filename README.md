@@ -66,6 +66,12 @@ sweep. You can also click frets on the board directly.
 - **Scale drills**: lights every in-key position on the board. *Freeform*
   scores each note as in or out of key. *Run* walks a position box up
   and down and tracks position-accurate progress.
+- **Quiz**: fretboard-knowledge drills. *Note names* asks for a pitch
+  class anywhere ("play any F#"). *Exact positions* asks for a
+  string/fret pair. With multi-channel MIDI it checks string and fret.
+  In single-channel mode it falls back to matching pitch because the
+  device does not name the string. Stats shown: `hits/tries`, streak,
+  average response seconds.
 
 ## Sounds
 
@@ -88,7 +94,10 @@ playback-side surface of the Jamstik Creator app:
 - **Effects**: drive (waveshaper), tone (lowpass), delay, reverb
   (generated impulse), master volume.
 - **Velocity curves**: linear / soft / hard response into the synth.
-- **Record**: captures the synth output to a `.webm` download.
+- **Record**: two captures. `record` saves the synth audio as `.webm`.
+  `.mid` records incoming note-on/off events with timing and exports a
+  Standard MIDI File (format 0, 480 PPQ, channels 1-6 by string) that
+  drops into any DAW.
 
 Device-side settings the Jamstik app exposes (firmware flashing,
 hammer-on thresholds, pickup sensitivity calibration) go over its
@@ -106,8 +115,10 @@ proprietary sysex/BLE channel and are intentionally not reimplemented.
 ## Visualizations
 
 Waveform (time domain), spectrum (log-spaced FFT bars), scrolling
-spectrogram, and the wavetable frames the synth uses. Synth and real-input
-traces overlay in teal and pink.
+spectrogram, the wavetable frames the synth uses, and a note waterfall:
+per-string lanes scrolling left over the last 12 seconds, each note a
+colored bar from attack to release so you can see your timing. Synth and
+real-input traces overlay in teal and pink.
 
 ## Layout
 
@@ -118,8 +129,8 @@ js/midi.js          Web MIDI engine, channel->string map, VirtualJamstik
 js/audio.js         preset wavetable synth, FX chain, real-input capture,
                     recorder, metronome
 js/fretboard.js     canvas board: notes, bends, targets, scale overlay
-js/viz.js           scope / spectrum / spectrogram / wavetable frames
-js/modes.js         free play, chord trainer, scale drills
+js/viz.js           scope / spectrum / spectrogram / wavetable / waterfall
+js/modes.js         free play, chord trainer, scale drills, tuner, quiz
 ```
 
 ## Limits

@@ -2,6 +2,7 @@
 // spectrogram, and the wavetable frame display.
 
 import { waveFrame, PRESETS } from './audio.js';
+import { midiName } from './theory.js';
 
 function prep(canvas) {
   const g = canvas.getContext('2d');
@@ -122,4 +123,49 @@ export function drawWavetable(canvas, engine) {
     g.font = '9px ui-monospace, monospace';
     g.fillText(name, 12, row * fh + 11);
   });
+}
+
+// Note waterfall: per-string lanes scrolling left, bars = held duration.
+// History entries: {str, midi, vel, t0, t1|null, inferred}.
+export function drawWaterfall(canvas, history, active, now, windowMs = 12000) {
+  const { g, w, h } = prep(canvas);
+  g.clearRect(0, 0, w, h);
+  const laneH = h / 6;
+  const xOf = t => w - ((now - t) / windowMs) * w;
+  const STRING_COLORS = { 6: '#f87171', 5: '#fb923c', 4: '#fbbf24', 3: '#34d399', 2: '#60a0ff', 1: '#a78bfa' };
+
+  for (let s = 6; s >= 1; s--) {
+    const y = (6 - s) * laneH;
+    g.strokeStyle = '#1e293b';
+    g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+    g.fillStyle = '#475569';
+    g.font = '9px ui-monospace, monospace';
+    g.fillText(s === 6 ? 'E' : s === 1 ? 'e' : 'ADGB'[5 - s], 4, y + laneH - 4);
+  }
+  // 1-second gridlines
+  for (let sec = 1; sec * 1000 < windowMs; sec++) {
+    const x = xOf(now - sec * 1000);
+    g.strokeStyle = 'rgba(51,65,85,0.4)';
+    g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke();
+  }
+
+  const cutoff = now - windowMs;
+  for (const ev of history) {
+    if ((ev.t1 ?? now) < cutoff) continue;
+    const x0 = Math.max(0, xOf(ev.t0));
+    const x1 = Math.min(w, xOf(ev.t1 ?? now));
+    if (x1 - x0 < 1.5) continue;
+    const y = (6 - ev.str) * laneH;
+    const col = STRING_COLORS[ev.str] || '#94a3b8';
+    g.fillStyle = ev.inferred ? col + '66' : col + 'cc';
+    g.fillRect(x0, y + 3, x1 - x0, laneH - 6);
+    if (x1 - x0 > 22) {
+      g.fillStyle = '#0b1120';
+      g.font = 'bold 8px ui-monospace, monospace';
+      g.fillText(midiName(ev.midi), x0 + 3, y + laneH - 6);
+    }
+  }
+  // "now" edge
+  g.strokeStyle = '#5eead4';
+  g.beginPath(); g.moveTo(w - 1, 0); g.lineTo(w - 1, h); g.stroke();
 }
