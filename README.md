@@ -57,7 +57,8 @@ sweep. You can also click frets on the board directly.
   including bends instead of measured string frequency.
 - **Free play**: live note names and bend amounts on the fretboard, plus
   a chord readout that resolves stable voicings (including slash chords
-  and no-5th voicings like x32310 C7).
+  and no-5th voicings like x32310 C7). A strum line reports the note
+  count and millisecond spread of your last strum.
 - **Chord trainer**: prompts a shape, draws the target fingering, listens
   for your strum, and reports the verdict. Feedback covers exact matches,
   missing or extra chord tones, and per-string faults (wrong fret,
@@ -66,6 +67,10 @@ sweep. You can also click frets on the board directly.
 - **Scale drills**: lights every in-key position on the board. *Freeform*
   scores each note as in or out of key. *Run* walks a position box up
   and down and tracks position-accurate progress.
+- **Changes**: timed chord switching. The board shows the target shape
+  and the panel previews the next chord. The clock runs until the held
+  notes resolve to exactly the target's chord tones. Stats track switch
+  times. Same four progressions as the trainer.
 - **Quiz**: fretboard-knowledge drills. *Note names* asks for a pitch
   class anywhere ("play any F#"). *Exact positions* asks for a
   string/fret pair. With multi-channel MIDI it checks string and fret.
@@ -100,11 +105,15 @@ playback-side surface of the Jamstik Creator app:
   MIDI File (format 0, 480 PPQ, channels 1-6 by string, bends encoded at
   the usual +/-2 wheel assumption) for any DAW. `take` replays the last
   MIDI recording through the app's own pipeline, so a take shows up on
-  the board and waterfall exactly as it was played.
+  the board and waterfall exactly as it was played. `loop` repeats it.
+  `open .mid` imports any Standard MIDI File (formats 0/1, PPQ division,
+  tempo-mapped, running status). A multi-channel file maps channels 1-6
+  to strings. A single-channel file plays through the inferred path.
 
 Settings persist in `localStorage`: tuning (including custom), transpose,
 velocity curve, FX levels, preset splits, channel mode, bend range, and
-metronome BPM all survive a reload.
+metronome BPM all survive a reload. The `tap` button sets BPM from
+your taps (average of the last four, reset after a 2.5s pause).
 
 Device-side settings the Jamstik app exposes (firmware flashing,
 hammer-on thresholds, pickup sensitivity calibration) go over its

@@ -243,3 +243,85 @@ function buildSmf(events) {
                 (track.length >> 8) & 0xff, track.length & 0xff];
   return new Uint8Array([...head, ...track]);
 }
+
+// Parses a Standard MIDI File (formats 0 and 1, PPQ division) into the
+// same event shape MidiPlayer consumes, so an imported file plays on
+// the board like a take. Channels 1-6 map to strings, anything else
+// goes through the inferred path. SMPTE-division files throw.
+export function parseSmf(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const u32 = p => dv.getUint32(p);
+  const u16 = p => dv.getUint16(p);
+  const u8 = p => dv.getUint8(p);
+  if (bytes.length < 14 || u32(0) !== 0x4d546864) throw new Error('not a MIDI file');
+  const hlen = u32(4);
+  const ntrk = u16(10);
+  const div = u16(12);
+  if (div & 0x8000) throw new Error('SMPTE-division MIDI files are not supported');
+  const tpq = div;
+  const readVar = p => {
+    let v = 0, b, n = 0;
+    do { b = u8(p++); v = (v << 7) | (b & 0x7f); } while ((b & 0x80) && ++n < 4);
+    return [v, p];
+  };
+
+  const tempos = [{ tick: 0, us: 500000 }];
+  const raw = [];
+  let pos = 8 + hlen;
+  for (let t = 0; t < ntrk; t++) {
+    if (pos + 8 > bytes.length || u32(pos) !== 0x4d54726b) break;
+    const end = pos + 8 + u32(pos + 4);
+    let p = pos + 8, tick = 0, status = 0;
+    while (p < end) {
+      const [d, p2] = readVar(p);
+      p = p2;
+      tick += d;
+      let st = u8(p);
+      if (st < 0x80) st = status;
+      else { p++; if (st < 0xf0) status = st; }
+      const kind = st & 0xf0, ch = st & 0x0f;
+      if (kind === 0x90 || kind === 0x80) {
+        const midi = u8(p), vel = u8(p + 1); p += 2;
+        const on = kind === 0x90 && vel > 0;
+        raw.push({ tick, on, ch, midi, vel: on ? vel : 64 });
+      } else if (kind === 0xe0) {
+        raw.push({ tick, bend: true, ch, v: u8(p) | (u8(p + 1) << 7) });
+        p += 2;
+      } else if (kind === 0xa0 || kind === 0xb0) p += 2;
+      else if (kind === 0xc0 || kind === 0xd0) p += 1;
+      else if (st === 0xff) {
+        const meta = u8(p++); const [len, p3] = readVar(p); p = p3;
+        if (meta === 0x51 && len === 3) {
+          tempos.push({ tick, us: (u8(p) << 16) | (u8(p + 1) << 8) | u8(p + 2) });
+        }
+        p += len;
+        if (meta === 0x2f) break;
+      } else if (st === 0xf0 || st === 0xf7) {
+        const [len, p3] = readVar(p); p = p3 + len;
+      } else p++;
+    }
+    pos = end;
+  }
+
+  tempos.sort((a, b) => a.tick - b.tick);
+  const msAt = tick => {
+    let ms = 0, last = 0, us = tempos[0].us;
+    for (const t of tempos) {
+      if (t.tick >= tick) break;
+      ms += (t.tick - last) * (us / 1000) / tpq;
+      last = t.tick; us = t.us;
+    }
+    return ms + (tick - last) * (us / 1000) / tpq;
+  };
+  // Same convention as live input: only a genuinely multi-channel file
+  // gets channel->string mapping. A single-channel file is probably a
+  // piano/lead line and goes through the inferred path.
+  const multiCh = new Set(raw.filter(e => !e.bend).map(e => e.ch)).size >= 2;
+  const strOf = ch => multiCh && ch < 6 ? ch + 1 : null;
+  const events = raw.map(e => e.bend
+    ? { ms: msAt(e.tick), bend: true, str: strOf(e.ch),
+        semis: ((e.v - 8192) / 8192) * 2 }
+    : { ms: msAt(e.tick), on: e.on, str: strOf(e.ch), midi: e.midi, vel: e.vel });
+  events.sort((a, b) => a.ms - b.ms);
+  return events;
+}

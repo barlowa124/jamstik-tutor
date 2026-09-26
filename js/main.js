@@ -1,11 +1,11 @@
 // App wiring: state, mode dispatch, render loop, device management.
 
 import { OPEN_MIDI, midiName, inferString, setTuning, setTuningValues, TUNINGS, currentTuningName, STRING_NAMES } from './theory.js';
-import { MidiEngine, VirtualJamstik, MidiRecorder, MidiPlayer } from './midi.js';
+import { MidiEngine, VirtualJamstik, MidiRecorder, MidiPlayer, parseSmf } from './midi.js';
 import { SynthEngine, RealInput, Metronome, SessionRecorder, PRESETS, PRESET_CATS, VELOCITY_CURVES } from './audio.js';
 import { Fretboard } from './fretboard.js';
 import { drawScope, drawSpectrum, drawWavetable, drawWaterfall, Spectrogram } from './viz.js';
-import { FreePlay, ChordTrainer, ScaleDrill, Tuner, Quiz } from './modes.js';
+import { FreePlay, ChordTrainer, ScaleDrill, Tuner, Quiz, ChordChanges } from './modes.js';
 
 const $ = id => document.getElementById(id);
 
@@ -190,7 +190,7 @@ function fillDeviceList(inputs) {
 }
 
 // ── Modes ───────────────────────────────────────────────────────────────
-const MODES = { free: FreePlay, chords: ChordTrainer, scales: ScaleDrill, tuner: Tuner, quiz: Quiz };
+const MODES = { free: FreePlay, chords: ChordTrainer, scales: ScaleDrill, tuner: Tuner, quiz: Quiz, changes: ChordChanges };
 
 function setMode(name) {
   app.mode?.deactivate?.();
@@ -419,17 +419,50 @@ function buildSoundsPanel() {
       midPlay.disabled = !events.length;
     }
   };
+  const loopLbl = el('label', 'hint');
+  const loopChk = el('input');
+  loopChk.type = 'checkbox';
+  loopLbl.append(loopChk, ' loop');
+  let manualStop = false;
+  const startPlay = () => {
+    manualStop = false;
+    app.midiPlayer.play(app.lastMidi, () => {
+      if (!manualStop && loopChk.checked && app.lastMidi?.length) startPlay();
+      else midPlay.textContent = '▶ take';
+    });
+    midPlay.textContent = '■ playing…';
+  };
   midPlay.onclick = () => {
     app.midiPlayer ??= new MidiPlayer(handlers);
-    if (app.midiPlayer.playing) { app.midiPlayer.finish(); }
+    if (app.midiPlayer.playing) { manualStop = true; app.midiPlayer.finish(); }
     else if (app.lastMidi?.length) {
       app.synth.ensure();
-      app.midiPlayer.play(app.lastMidi, () => { midPlay.textContent = '▶ take'; });
-      midPlay.textContent = '■ playing…';
+      startPlay();
     }
   };
+  const loadLbl = el('label', 'file-btn', 'open .mid');
+  const fileIn = el('input');
+  fileIn.type = 'file';
+  fileIn.accept = '.mid,.midi,audio/midi';
+  fileIn.style.display = 'none';
+  fileIn.onchange = async () => {
+    const f = fileIn.files?.[0];
+    if (!f) return;
+    try {
+      const events = parseSmf(new Uint8Array(await f.arrayBuffer()));
+      if (!events.length) throw new Error('no note events');
+      app.lastMidi = events;
+      midPlay.disabled = false;
+      loadLbl.textContent = `loaded ${f.name.length > 16 ? f.name.slice(0, 14) + '…' : f.name}`;
+    } catch (err) {
+      loadLbl.textContent = 'bad .mid';
+      setTimeout(() => { loadLbl.textContent = 'open .mid'; }, 1500);
+    }
+    fileIn.value = '';
+  };
+  loadLbl.append(fileIn);
   p.append(el('div', 'cat-label', 'capture'));
-  p.append(rec, midRec, midPlay);
+  p.append(rec, midRec, midPlay, loadLbl, loopLbl);
 }
 
 // ── Render loop ─────────────────────────────────────────────────────────
@@ -506,6 +539,23 @@ function init() {
       };
       metro.m.start();
       $('metro').textContent = '■ metronome';
+    }
+  };
+
+  const taps = [];
+  $('tap').onclick = () => {
+    const now = performance.now();
+    if (taps.length && now - taps[taps.length - 1] > 2500) taps.length = 0;
+    taps.push(now);
+    if (taps.length > 4) taps.shift();
+    if (taps.length >= 2) {
+      const iv = (taps[taps.length - 1] - taps[0]) / (taps.length - 1);
+      const bpm = Math.round(60000 / iv);
+      if (bpm >= 40 && bpm <= 220) {
+        $('bpm').value = bpm;
+        if (metro.m?.running) metro.m.bpm = bpm;
+        saveSettings();
+      }
     }
   };
 

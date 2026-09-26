@@ -24,7 +24,8 @@ export class FreePlay {
     this.readout = el('div', 'big-readout', 'no notes held');
     this.readout.style.color = '#334155';
     this.notes = el('div', 'held-notes', '');
-    panel.append(this.readout, this.notes);
+    this.strum = el('div', 'hint', '');
+    panel.append(this.readout, this.notes, this.strum);
     this.debounce = null;
     this.refresh();
   }
@@ -48,6 +49,21 @@ export class FreePlay {
     const c = detectChord(midis);
     this.readout.textContent = c ? c.label : midis.map(midiName).join(' ');
     this.readout.style.color = c ? '#5eead4' : '#94a3b8';
+    // Strum timing: the most recent onset cluster (notes within 90ms of
+    // each other) — a clean strum lands all strings within ~35ms.
+    const evs = this.app.history;
+    const onsets = [];
+    for (let i = evs.length - 1; i >= 0; i--) {
+      const t = evs[i].t0;
+      if (onsets.length && onsets[onsets.length - 1] - t > 90) break;
+      onsets.push(t);
+    }
+    if (onsets.length >= 3) {
+      const spread = Math.round(Math.max(...onsets) - Math.min(...onsets));
+      this.strum.textContent =
+        `last strum: ${onsets.length} notes over ${spread}ms` +
+        (spread <= 35 ? ' — tight' : spread >= 90 ? ' — wide' : '');
+    } else this.strum.textContent = '';
   }
 }
 
@@ -442,4 +458,74 @@ export class Quiz {
   }
 
   onNotesChange() {}
+}
+
+// ── Chord changes ───────────────────────────────────────────────────────
+// Timed switching drill: the board shows the target shape and the panel
+// shows what's next; the clock runs until the held notes resolve to the
+// exact chord tones.
+export class ChordChanges {
+  constructor(app) { this.app = app; }
+
+  activate(panel) {
+    this.app.fretboard.scaleOverlay = null;
+    this.standardTuning = currentTuningName() === 'standard';
+    this.PROG = {
+      'C–G–Am–F': ['C maj', 'G maj', 'A min', 'F maj'],
+      'I–V–vi–IV in G': ['G maj', 'D maj', 'E min', 'C maj'],
+      'ii–V–I in C': ['D min', 'G 7', 'C maj'],
+      '12-bar blues in E': ['E maj', 'A maj', 'B 7', 'A maj'],
+    };
+    const sel = el('select');
+    for (const k of Object.keys(this.PROG)) sel.append(el('option', '', k));
+    sel.onchange = () => { this.seq = this.PROG[sel.value]; this.ix = 0; this.ask(); };
+    this.seq = this.PROG[Object.keys(this.PROG)[0]];
+    this.times = [];
+    this.ix = 0;
+    this.prompt = el('div', 'big-readout', '');
+    this.nextUp = el('div', 'hint', '');
+    this.verdict = el('div', 'verdict', '');
+    this.stats = el('div', 'stats', '');
+    panel.append(sel, this.prompt, this.nextUp, this.verdict, this.stats);
+    panel.append(el('div', 'hint',
+      'Strum the named chord as soon as it appears. The clock runs ' +
+      'until the held notes are exactly its chord tones, then the next ' +
+      'name appears. Position coaching is not part of this drill.'));
+    this.ask();
+  }
+
+  deactivate() { this.app.fretboard.targets = null; }
+
+  ask() {
+    const cur = this.seq[this.ix % this.seq.length];
+    const nxt = this.seq[(this.ix + 1) % this.seq.length];
+    this.cur = cur;
+    this.prompt.textContent = `→ ${cur}`;
+    this.nextUp.textContent = `next: ${nxt}`;
+    this.app.fretboard.targets = this.standardTuning ? CHORD_SHAPES[cur] ?? null : null;
+    this.promptT = performance.now();
+    this.done = false;
+  }
+
+  onNotesChange() {
+    if (this.done) return;
+    const midis = [...this.app.held.values()].map(n => n.midi);
+    if (midis.length < 3) return;
+    const cf = chordFromLabel(this.cur);
+    const gap = cf && chordGap(cf.root, cf.suffix, midis);
+    if (gap?.exact) {
+      const dt = (performance.now() - this.promptT) / 1000;
+      this.times.push(dt);
+      this.verdict.textContent = `${this.cur} in ${dt.toFixed(1)}s`;
+      this.verdict.style.color = '#34d399';
+      const avg = this.times.reduce((a, b) => a + b) / this.times.length;
+      this.stats.textContent =
+        `${this.times.length} changes · last ${this.times.slice(-4).map(t => t.toFixed(1)).join('s, ')}s · avg ${avg.toFixed(1)}s`;
+      this.done = true;
+      this.ix++;
+      setTimeout(() => this.ask(), 350);
+    }
+  }
+
+  onNoteOn() {}
 }
