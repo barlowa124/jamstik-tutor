@@ -1002,7 +1002,33 @@ const RIFFS = {
   'low e echo': [[6, 0], [6, 3], [5, 0], [6, 0], [6, 5], [5, 0], [6, 3], [6, 0]],
   'open string waltz': [[3, 0], [2, 1], [1, 0], [3, 0], [2, 3], [1, 0],
     [3, 0], [2, 1], [1, 3]],
+  'yankee doodle': [[2, 1], [2, 1], [2, 3], [1, 0], [2, 1], [1, 0], [2, 3], [3, 0],
+    [2, 1], [2, 1], [2, 3], [1, 0], [2, 1], [2, 0], [3, 0]],
+  'au clair de la lune': [[2, 1], [2, 1], [2, 1], [2, 3], [1, 0], [2, 3], [2, 1],
+    [1, 0], [2, 3], [2, 3], [2, 1]],
+  'greensleeves': [[3, 2], [3, 5], [3, 7], [2, 5], [3, 10], [2, 5], [3, 7],
+    [2, 0], [3, 0], [3, 2], [2, 0], [3, 5], [3, 2]],
+  'swing low': [[1, 3], [1, 8], [1, 8], [1, 10], [1, 8], [1, 3], [1, 0],
+    [1, 3], [1, 8], [1, 8], [1, 10], [1, 8], [1, 5], [1, 3], [1, 0], [1, 3]],
+  'kumbaya': [[2, 1], [1, 0], [1, 3], [1, 3], [1, 5], [1, 3], [1, 3], [1, 0], [2, 1]],
+  'skip to my lou': [[2, 1], [1, 0], [1, 3], [1, 3], [1, 0], [2, 1], [2, 3], [2, 3],
+    [1, 0], [1, 3], [1, 0], [2, 1]],
+  'sakura sakura': [[1, 0], [1, 0], [1, 7], [1, 8], [1, 7], [1, 5], [1, 7], [1, 8],
+    [1, 7], [1, 5], [2, 6], [1, 0], [2, 6], [1, 0], [2, 0]],
+  'string hopper': [[6, 5], [4, 5], [6, 7], [4, 7], [5, 5], [3, 5], [5, 7], [3, 7]],
+  'rainbow arc': [[1, 5], [2, 5], [3, 5], [4, 5], [4, 7], [3, 7], [2, 7], [1, 7]],
+  'midnight drive': [[5, 0], [6, 3], [5, 0], [5, 3], [4, 0], [4, 3], [5, 0], [6, 0]],
 };
+
+const RIFF_GROUPS = [
+  ['exercises', ['blues shuffle in A', 'pentatonic walk-up in A', 'G run walk-down',
+    'travis pick in C', 'power riff in E', 'spider climb', 'low e echo',
+    'open string waltz', 'string hopper', 'rainbow arc', 'midnight drive']],
+  ['tunes', ['twinkle twinkle', 'yankee doodle', 'au clair de la lune', 'kumbaya',
+    'skip to my lou', 'swing low', 'when the saints', 'ode to joy (melody)',
+    'amazing grace', 'scarborough fair', 'drunken sailor', 'sakura sakura',
+    'greensleeves', 'house of the rising sun']],
+];
 
 export class RiffDrill {
   constructor(app) { this.app = app; }
@@ -1012,7 +1038,12 @@ export class RiffDrill {
     panel.append(el('h2', '', 'riff drills'));
     const row = el('div', 'row');
     this.sel = el('select');
-    for (const k of Object.keys(RIFFS)) this.sel.append(el('option', '', k));
+    for (const [gname, keys] of RIFF_GROUPS) {
+      const og = document.createElement('optgroup');
+      og.label = gname;
+      for (const k of keys) og.append(el('option', '', k));
+      this.sel.append(og);
+    }
     this.sel.onchange = () => this.reset();
     const hear = el('button', '', 'hear it');
     hear.onclick = () => this.playRiff();
@@ -1050,10 +1081,12 @@ export class RiffDrill {
   playRiff() {
     this.app.synth.ensure();
     const steps = RIFFS[this.sel.value];
+    const bpm = +document.getElementById('bpm').value || 80;
+    const gap = 30000 / bpm; // eighth-note steps at the header tempo
     steps.forEach(([str, fret], i) => {
       const midi = OPEN_MIDI[str] + fret;
-      setTimeout(() => this.app.synth.noteOn(`rf${i}`, midi, 90, str), i * 260);
-      setTimeout(() => this.app.synth.noteOff(`rf${i}`, midi), i * 260 + 230);
+      setTimeout(() => this.app.synth.noteOn(`rf${i}`, midi, 90, str), i * gap);
+      setTimeout(() => this.app.synth.noteOff(`rf${i}`, midi), i * gap + gap * 0.9);
     });
   }
 
