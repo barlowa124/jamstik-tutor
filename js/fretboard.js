@@ -138,10 +138,13 @@ export class Fretboard {
       if (fret < 0 || fret > FRET_COUNT) continue;
       const x = this.fretCenter(fret);
       const y = this.stringY(s) - (n.bend || 0) * 6;
+      const amp = n.amp ?? 1;
       g.beginPath();
       g.arc(x, y, 10, 0, 7);
+      g.globalAlpha = 0.25 + 0.75 * amp; // CC11 decay fades the dot
       g.fillStyle = '#5eead4';
       g.fill();
+      g.globalAlpha = 1;
       g.fillStyle = '#0b1120';
       g.textAlign = 'center';
       g.font = 'bold 9px ui-monospace, monospace';

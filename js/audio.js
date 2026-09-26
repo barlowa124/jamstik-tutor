@@ -201,8 +201,13 @@ export class SynthEngine {
     };
     mk(0);
     if (preset.double) { mk(preset.double); mk(-preset.double); }
-    g.connect(this.master);
-    this.voices.set(key, { oscs, gain: g, midi, pMidi, str, preset: name, peak });
+    // Second stage so incoming expression (CC11 string decay) can scale
+    // the voice without fighting the envelope ramps on g.
+    const eg = this.ctx.createGain();
+    eg.gain.value = 1;
+    g.connect(eg);
+    eg.connect(this.master);
+    this.voices.set(key, { oscs, gain: g, expr: eg, midi, pMidi, str, preset: name, peak });
   }
 
   noteOff(key, midi = null, release = null) {
@@ -213,8 +218,19 @@ export class SynthEngine {
     const t = this.ctx.currentTime;
     v.gain.gain.cancelScheduledValues(t);
     v.gain.gain.setTargetAtTime(0.0001, t, rel / 3);
+    // Expression stage releases with the voice so a leftover CC11 value
+    // cannot hold an audible residue.
+    v.expr.gain.cancelScheduledValues(t);
+    v.expr.gain.setTargetAtTime(0.0001, t, rel / 3);
     for (const o of v.oscs) o.stop(t + rel * 4);
     this.voices.delete(key);
+  }
+
+  setExpression(key, v) {
+    if (!Number.isFinite(v)) return;
+    const n = this.voices.get(key);
+    if (!n) return;
+    n.expr.gain.setTargetAtTime(Math.max(v, 0.0001), this.ctx.currentTime, 0.04);
   }
 
   bend(key, semis) {

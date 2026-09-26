@@ -40,6 +40,11 @@ Channel handling is automatic by default (`ch: auto`):
   sounded.
 - **MPE mode** (notes spread across channels) plays polyphonically with
   inferred positions.
+- **CC11 expression**: the Jamstik Studio streams each string's measured
+  amplitude (physical decay) as CC11 per channel. The tutor applies it
+  to the sounding synth voice and fades the board dot as the string
+  dies — palm muting reads as an immediate fade. Single-channel input
+  applies it to all ringing notes, matching channel-wide semantics.
 
 Force a mode with the **ch** selector if auto-detection misfires.
 Pitch bend defaults to ±2 semitones. Set ±4/±12/±24 to match your

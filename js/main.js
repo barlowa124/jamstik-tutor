@@ -104,12 +104,12 @@ const handlers = {
       str = pos.string;
       inferred = true;
     }
-    app.held.set(key, { str, midi, rawMidi, vel, bend: 0, inferred });
+    app.held.set(key, { str, midi, rawMidi, vel, bend: 0, inferred, amp: 1 });
     app.history.push({ key, str, midi, vel, t0: performance.now(), t1: null, inferred });
     if (app.history.length > 2000) app.history.shift();
     app.midiRec?.add(true, inferred ? null : str, midi, vel, rawMidi);
     app.synth.noteOn(key, midi, vel, str);
-    app.fretboard.active.set(str, { midi, bend: 0 });
+    app.fretboard.active.set(str, { midi, bend: 0, amp: 1 });
     app.mode?.onNoteOn?.(str, midi, vel);
     app.mode?.onNotesChange?.();
     logMidi(`on  s${str}${inferred ? '?' : ''} ${midiName(midi)} v${vel}`);
@@ -163,6 +163,22 @@ const handlers = {
     app.synth.bend(hit ? hit[0] : `s${str}`, semis);
     app.mode?.onBend?.(str, semis);
     logMidi(`bend s${str} ${semis >= 0 ? '+' : ''}${semis.toFixed(2)}`);
+  },
+  // CC11 from the Jamstik: the string's measured amplitude, 0-1.
+  // Per-string in multi-channel mode; in single-channel it applies to
+  // whatever is currently ringing (channel-wide semantics).
+  onExpression(str, v) {
+    if (!Number.isFinite(v)) return;
+    if (str != null) {
+      const n = app.held.get(`s${str}`);
+      if (n) n.amp = v;
+      const f = app.fretboard.active.get(str);
+      if (f) f.amp = v;
+      app.synth.setExpression(`s${str}`, v);
+      return;
+    }
+    for (const [k, n] of app.held) { n.amp = v; app.synth.setExpression(k, v); }
+    for (const f of app.fretboard.active.values()) f.amp = v;
   },
   onStateChange(text) { $('status').textContent = text; },
   onInputsChanged(inputs) { fillDeviceList(inputs); },

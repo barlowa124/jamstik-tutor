@@ -88,6 +88,11 @@ export class MidiEngine {
       const v14 = ((d2 << 7) | d1) - 8192;
       // Single-channel bend is global; multi-channel bend is per string.
       this.h.onPitchBend?.(multi ? str : null, (v14 / 8192) * this.bendRangeSemis, t);
+    } else if (type === CC && d1 === 11) {
+      // CC11 = per-string amplitude envelope on the Jamstik (MPE
+      // expression carries physical string decay). Per-string in
+      // multi-channel mode, global in single-channel.
+      this.h.onExpression?.(multi ? str : null, d2 / 127, t);
     } else if (type === CC && (d1 === 123 || d1 === 120)) {
       this.h.onAllOff?.(); // all notes off / all sound off
     }
@@ -115,6 +120,7 @@ export class VirtualJamstik {
   noteOn(str, midi, vel = 96) { this.h.onNoteOn?.(`s${str}`, str, midi, vel, performance.now()); }
   noteOff(str, midi) { this.h.onNoteOff?.(`s${str}`, str, midi, performance.now()); }
   bend(str, semis) { this.h.onPitchBend?.(str, semis, performance.now()); }
+  expr(str, v) { this.h.onExpression?.(str, v, performance.now()); }
 
   // Strum a chord shape {string: fret|null} top-down (low strings first),
   // delayMs per string, rings until release() or until durMs passes.
