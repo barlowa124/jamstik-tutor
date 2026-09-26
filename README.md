@@ -63,7 +63,7 @@ sweep. You can also click frets on the board directly.
   metronome tempo for play-along practice.
 - **Chord trainer**: prompts a shape, draws the target fingering (a
   `show shape` toggle hides the diagram so you find the voicing from the
-  name alone — judging is pitch-class based either way), listens
+  name alone, and judging is pitch-class based either way), listens
   for your strum, and reports the verdict. Feedback covers exact matches,
   missing or extra chord tones, and per-string faults (wrong fret,
   unmuted string). Progressions: C G Am F, I V vi IV in G, ii V I in C,
@@ -110,7 +110,7 @@ sweep. You can also click frets on the board directly.
   *Fretboard sweep* gives 20s to find every position of one pitch
   class, scoring distinct spots found (unique pitches in
   single-channel mode). *Play it back* plays a 4-note pentatonic
-  phrase through the synth and you repeat it by ear in order; a wrong
+  phrase through the synth and you repeat it by ear in order. A wrong
   note names its position and resets the attempt.
   Stats shown: `hits/tries`, streak, average response seconds, a
   running `today` tally, a 7-day total, and a per-day hit-rate bar row.
