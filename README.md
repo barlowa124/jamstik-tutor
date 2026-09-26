@@ -61,7 +61,9 @@ sweep. You can also click frets on the board directly.
   count and millisecond spread of your last strum. A backing loop
   strums any of the four progressions through the synth at the
   metronome tempo for play-along practice.
-- **Chord trainer**: prompts a shape, draws the target fingering, listens
+- **Chord trainer**: prompts a shape, draws the target fingering (a
+  `show shape` toggle hides the diagram so you find the voicing from the
+  name alone — judging is pitch-class based either way), listens
   for your strum, and reports the verdict. Feedback covers exact matches,
   missing or extra chord tones, and per-string faults (wrong fret,
   unmuted string). Progressions: C G Am F, I V vi IV in G, ii V I in C,
@@ -100,14 +102,16 @@ sweep. You can also click frets on the board directly.
   interval from buttons, no guitar needed. *Chords by ear* plays a
   triad answered by quality (major / minor / dominant 7th). *Dynamics*
   prompts for a pick velocity band and scores the MIDI velocity.
-  *Hold duration* asks for a note held one whole note at the header
-  BPM, judged on release timing. *Intervals on board* lights a fret and
+  *Hold duration* asks for a note held a half note, whole note, or two
+  bars at the header BPM, judged on release timing. *Intervals on board* lights a fret and
   asks for the note a named interval above it (m3 through P5).
   *Staff reading* shows a notehead on a treble staff and requires the
   exact octave. Miss feedback names the octave distance.
   *Fretboard sweep* gives 20s to find every position of one pitch
   class, scoring distinct spots found (unique pitches in
-  single-channel mode).
+  single-channel mode). *Play it back* plays a 4-note pentatonic
+  phrase through the synth and you repeat it by ear in order; a wrong
+  note names its position and resets the attempt.
   Stats shown: `hits/tries`, streak, average response seconds, a
   running `today` tally, a 7-day total, and a per-day hit-rate bar row.
   Daily drill counts persist

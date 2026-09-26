@@ -153,8 +153,19 @@ export class ChordTrainer {
     hear.onclick = () => this.playTarget();
     const skip = el('button', '', 'next');
     skip.onclick = () => this.next();
-    row.append(prog, sel, hear, skip);
+    const hints = el('label', 'opt');
+    const hintsCb = document.createElement('input');
+    hintsCb.type = 'checkbox';
+    hintsCb.checked = true;
+    hints.append(hintsCb, document.createTextNode(' show shape'));
+    row.append(prog, sel, hear, skip, hints);
     panel.append(row);
+    hintsCb.onchange = () => {
+      this.showHints = hintsCb.checked;
+      this.app.fretboard.targets =
+        this.showHints && this.standardTuning ? CHORD_SHAPES[this.cur] : null;
+      this.verdict.textContent = this.showHints ? 'strum the shape shown' : `find a ${this.cur} voicing yourself`;
+    };
 
     if (!this.standardTuning) {
       panel.append(el('div', 'hint',
@@ -200,10 +211,12 @@ export class ChordTrainer {
   show(label) {
     this.cur = label;
     const shape = CHORD_SHAPES[label];
-    this.app.fretboard.targets = this.standardTuning ? shape : null;
+    this.app.fretboard.targets =
+      this.showHints !== false && this.standardTuning ? shape : null;
     this.target.textContent = label;
     this.target.style.color = '#fbbf24';
-    this.verdict.textContent = 'strum the shape shown';
+    this.verdict.textContent =
+      this.showHints !== false ? 'strum the shape shown' : `find a ${label} voicing yourself`;
     this.verdict.style.color = '#94a3b8';
     this.promptT = performance.now();
     this.judged = false;
@@ -462,7 +475,7 @@ export class Quiz {
     for (const [v, label] of [['mixed', 'mixed drills'], ['note', 'note names'],
       ['spot', 'exact positions'], ['bend', 'bend targets'], ['arp', 'arpeggio runs'],
       ['dyn', 'dynamics'], ['hold', 'hold duration'], ['ivb', 'intervals on board'],
-      ['read', 'staff reading'], ['all', 'fretboard sweep'],
+      ['read', 'staff reading'], ['all', 'fretboard sweep'], ['dict', 'play it back'],
       ['ear', 'intervals by ear'], ['cear', 'chords by ear']]) {
       this.kindSel.append(el('option', '', label));
       this.kindSel.lastChild.value = v;
@@ -501,9 +514,14 @@ export class Quiz {
     const replay2 = el('button', '', '↻ hear again');
     replay2.onclick = () => this.playEar();
     this.cearRow.append(replay2);
+    this.dictRow = el('div', 'row');
+    this.dictRow.style.display = 'none';
+    const replay3 = el('button', '', '↻ hear again');
+    replay3.onclick = () => this.playEar();
+    this.dictRow.append(replay3);
     this.staffCv = el('canvas', 'quiz-staff');
     this.staffCv.style.display = 'none';
-    panel.append(this.earRow, this.cearRow, this.staffCv);
+    panel.append(this.earRow, this.cearRow, this.dictRow, this.staffCv);
     panel.append(el('div', 'hint',
       'Note drills accept the pitch class on any string. Position drills ' +
       'need multi-channel MIDI — in single-channel mode they match pitch only.'));
@@ -515,12 +533,13 @@ export class Quiz {
   ask() {
     let kind = this.kindSel.value;
     if (kind === 'mixed') {
-      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'read', 'all', 'ear', 'cear'][Math.floor(Math.random() * 11)];
+      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'read', 'all', 'dict', 'ear', 'cear'][Math.floor(Math.random() * 12)];
     }
     this.promptT = performance.now();
     this.app.fretboard.targets = null;
     this.earRow.style.display = kind === 'ear' ? '' : 'none';
     this.cearRow.style.display = kind === 'cear' ? '' : 'none';
+    this.dictRow.style.display = 'none';
     this.staffCv.style.display = 'none';
     if (kind === 'ear' || kind === 'cear') {
       if (kind === 'ear') {
@@ -545,10 +564,11 @@ export class Quiz {
     if (kind === 'hold') {
       const pc = Math.floor(Math.random() * 12);
       const bpm = +document.getElementById('bpm').value || 80;
-      this.target = { kind, pc, beats: 4, ms: 4 * 60000 / bpm };
+      const [beats, name] = [[2, 'a half note'], [4, 'a whole note'], [8, 'two bars']][Math.floor(Math.random() * 3)];
+      this.target = { kind, pc, beats, ms: beats * 60000 / bpm };
       this.holdMidi = null;
       this.holdT = 0;
-      this.prompt.textContent = `hold any ${pcName(pc)} for a whole note (${Math.round(this.target.ms)}ms at ${bpm}bpm)`;
+      this.prompt.textContent = `hold any ${pcName(pc)} for ${name} (${Math.round(this.target.ms)}ms at ${bpm}bpm)`;
       this.verdict.textContent = '';
       return;
     }
@@ -578,6 +598,23 @@ export class Quiz {
       this.prompt.textContent = `play every ${pcName(pc)} on the board — 20s`;
       this.verdict.textContent = 'go';
       this.verdict.style.color = '#5eead4';
+      return;
+    }
+    if (kind === 'dict') {
+      const root = Math.floor(Math.random() * 12);
+      const ivs = [0, 3, 5, 7, 10]; // minor pentatonic — stay in one scale
+      let deg = 0;
+      const seq = [deg];
+      for (let i = 0; i < 3; i++) {
+        deg = Math.max(0, Math.min(4, deg + (Math.random() < 0.5 ? -1 : 1)));
+        seq.push(deg);
+      }
+      const base = 57 + root; // mid register
+      this.target = { kind, seq, ix: 0, midis: seq.map(d => base + ivs[d]) };
+      this.dictRow.style.display = '';
+      this.prompt.textContent = 'repeat the 4-note phrase by ear';
+      this.verdict.textContent = 'listening…';
+      this.playEar();
       return;
     }
     if (kind === 'note') {
@@ -742,6 +779,25 @@ export class Quiz {
       else this.miss(`heard ${midiName(midi)} — the lit note plus ${t.iv} steps`);
       return;
     }
+    if (t.kind === 'dict') {
+      if (t.done) return;
+      const want = t.midis[t.ix];
+      if (((midi % 12) + 12) % 12 === ((want % 12) + 12) % 12) {
+        t.ix++;
+        this.verdict.style.color = '#5eead4';
+        if (t.ix >= t.midis.length) {
+          t.done = true;
+          this.hit((performance.now() - this.promptT) / 1000, `phrase replayed — ${t.midis.length} notes`);
+        } else {
+          this.verdict.textContent = `${t.ix}/${t.midis.length} — keep going`;
+        }
+      } else {
+        const at = t.ix + 1;
+        t.ix = 0;
+        this.miss(`note ${at} was ${midiName(midi)} — start over, hear again ↻`);
+      }
+      return;
+    }
     if (t.kind === 'read') {
       ok = midi === t.midi;
       const lat = (performance.now() - this.promptT) / 1000;
@@ -787,6 +843,8 @@ export class Quiz {
     } else if (t.kind === 'cear') {
       const intervals = { maj: [0, 4, 7], min: [0, 3, 7], 7: [0, 4, 7, 10] }[t.q];
       intervals.forEach((iv, i) => play(`ce${i}`, t.root + iv, 0, 1400));
+    } else if (t.kind === 'dict') {
+      t.midis.forEach((m, i) => play(`dic${i}`, m, i * 560, 480));
     }
   }
 
