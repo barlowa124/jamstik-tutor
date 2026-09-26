@@ -28,6 +28,10 @@ export class MidiEngine {
     // moment a second channel arrives; 'multi'/'mono' force a mode.
     this.chanMode = 'auto';
     this.seenCh = new Set();
+    // Channel layout: Jamstik multi-channel puts strings on 1-6; a strict
+    // MPE zone puts the manager on 1 and strings on 2-7. chBase shifts to
+    // 1 the first time a note lands on channel 7 (impossible in 1-6 layout).
+    this.chBase = 0;
   }
 
   async connect(inputId = null) {
@@ -61,6 +65,8 @@ export class MidiEngine {
   setInput(input) {
     if (this.input) this.input.onmidimessage = null;
     this.input = input;
+    this.seenCh.clear();
+    this.chBase = 0;
     input.onmidimessage = e => this.route(e);
     this.h.onStateChange?.(`connected: ${input.name}`);
   }
@@ -72,12 +78,16 @@ export class MidiEngine {
     this.h.onRaw?.(e.data, t);
 
     this.seenCh.add(ch);
+    // Learn the channel layout before mapping strings: a note on channel
+    // 7 is impossible in the 1-6 layout, so it marks the MPE 2-7 zone.
+    if (type === NOTE_ON && d2 > 0 && ch === 6) this.chBase = 1;
     const multi = this.chanMode === 'multi' ||
       (this.chanMode === 'auto' && this.seenCh.size > 1);
-    // Only channels 1-6 name strings. Single-channel input, and MPE
-    // traffic on channels >6, fall back to note-keyed voices and
-    // inferred positions.
-    const str = multi && ch < 6 ? stringForChannel(ch, this.flip) : null;
+    // Only the six string channels name strings. Single-channel input,
+    // and traffic on channels outside the string block, fall back to
+    // note-keyed voices and inferred positions.
+    const rel = ch - this.chBase;
+    const str = multi && rel >= 0 && rel < 6 ? stringForChannel(rel, this.flip) : null;
     const key = str !== null ? `s${str}` : `n${d1}`;
 
     if (type === NOTE_ON && d2 > 0) {
@@ -93,6 +103,10 @@ export class MidiEngine {
       // expression carries physical string decay). Per-string in
       // multi-channel mode, global in single-channel.
       this.h.onExpression?.(multi ? str : null, d2 / 127, t);
+    } else if (type === 0xd0) {
+      // Channel aftertouch — a second per-channel amplitude source on
+      // firmwares that stream pressure instead of CC11.
+      this.h.onExpression?.(multi ? str : null, d1 / 127, t);
     } else if (type === CC && (d1 === 123 || d1 === 120)) {
       this.h.onAllOff?.(); // all notes off / all sound off
     }
