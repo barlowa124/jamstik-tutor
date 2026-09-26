@@ -986,6 +986,22 @@ const RIFFS = {
     [2, 1], [2, 1], [2, 3], [1, 0], [1, 0], [2, 3], [2, 3]],
   'when the saints': [[2, 1], [1, 0], [1, 1], [1, 3], [2, 1], [1, 0], [1, 1], [1, 3],
     [1, 0], [2, 1], [1, 0], [2, 3]],
+  // Public-domain melodies.
+  'twinkle twinkle': [[2, 1], [2, 1], [1, 3], [1, 3], [1, 5], [1, 5], [1, 3],
+    [1, 1], [1, 1], [1, 0], [1, 0], [2, 3], [2, 3], [2, 1]],
+  'amazing grace': [[3, 7], [1, 3], [1, 7], [1, 3], [1, 7], [1, 5], [1, 3], [1, 0], [2, 3]],
+  'scarborough fair': [[4, 0], [4, 0], [4, 7], [4, 7], [3, 5], [3, 4], [4, 7],
+    [4, 3], [4, 2], [4, 0]],
+  'drunken sailor': [[4, 0], [4, 0], [4, 0], [4, 0], [4, 2], [4, 3], [3, 0],
+    [4, 7], [4, 7], [4, 7], [4, 7], [3, 4], [3, 5], [4, 7]],
+  'house of the rising sun': [[4, 7], [3, 5], [3, 7], [3, 10], [1, 5], [1, 8],
+    [1, 12], [1, 8], [1, 5]],
+  // Originals.
+  'spider climb': [[6, 1], [6, 2], [6, 3], [6, 4], [5, 1], [5, 2], [5, 3], [5, 4],
+    [4, 1], [4, 2], [4, 3], [4, 4]],
+  'low e echo': [[6, 0], [6, 3], [5, 0], [6, 0], [6, 5], [5, 0], [6, 3], [6, 0]],
+  'open string waltz': [[3, 0], [2, 1], [1, 0], [3, 0], [2, 3], [1, 0],
+    [3, 0], [2, 1], [1, 3]],
 };
 
 export class RiffDrill {
@@ -1054,8 +1070,13 @@ export class RiffDrill {
       this.verdict.style.color = '#34d399';
       if (this.ix >= steps.length) {
         const dt = (performance.now() - this.t0) / 1000;
+        const name = this.sel.value;
+        const best = this.best ??= {};
+        const isBest = !best[name] || dt < best[name];
+        if (isBest) best[name] = dt;
         this.verdict.textContent =
-          `riff complete — ${this.hits}/${this.hits + this.misses} in ${dt.toFixed(1)}s`;
+          `riff complete — ${this.hits}/${this.hits + this.misses} in ${dt.toFixed(1)}s` +
+          ` (best ${best[name].toFixed(1)}s${isBest ? ' *' : ''})`;
         this.app.bump?.('riffs', this.misses === 0, dt);
         this.ix = 0;
         this.t0 = performance.now();
