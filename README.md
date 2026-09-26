@@ -58,7 +58,9 @@ sweep. You can also click frets on the board directly.
 - **Free play**: live note names and bend amounts on the fretboard, plus
   a chord readout that resolves stable voicings (including slash chords
   and no-5th voicings like x32310 C7). A strum line reports the note
-  count and millisecond spread of your last strum.
+  count and millisecond spread of your last strum. A backing loop
+  strums any of the four progressions through the synth at the
+  metronome tempo for play-along practice.
 - **Chord trainer**: prompts a shape, draws the target fingering, listens
   for your strum, and reports the verdict. Feedback covers exact matches,
   missing or extra chord tones, and per-string faults (wrong fret,
@@ -66,7 +68,8 @@ sweep. You can also click frets on the board directly.
   12-bar blues in E.
 - **Scale drills**: lights every in-key position on the board. *Freeform*
   scores each note as in or out of key. *Run* walks a position box up
-  and down and tracks position-accurate progress.
+  and down and tracks position-accurate progress. *Hear scale* auditions
+  the box run through the current preset.
 - **Changes**: timed chord switching. The board shows the target shape
   and the panel previews the next chord. The clock runs until the held
   notes resolve to exactly the target's chord tones. Stats track switch
@@ -75,8 +78,11 @@ sweep. You can also click frets on the board directly.
   class anywhere ("play any F#"). *Exact positions* asks for a
   string/fret pair. With multi-channel MIDI it checks string and fret.
   In single-channel mode it falls back to matching pitch because the
-  device does not name the string. Stats shown: `hits/tries`, streak,
-  average response seconds.
+  device does not name the string. *Bend targets* asks for a quarter,
+  half, or whole-step bend held on any string (±12 cents). *Arpeggio
+  runs* draws a chord shape and times a low-to-high single-string pick.
+  In single-channel mode it accepts all chord tones sounding together.
+  Stats shown: `hits/tries`, streak, average response seconds.
 
 ## Sounds
 

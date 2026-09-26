@@ -26,10 +26,61 @@ export class FreePlay {
     this.notes = el('div', 'held-notes', '');
     this.strum = el('div', 'hint', '');
     panel.append(this.readout, this.notes, this.strum);
+    // Backing loop: strums a progression through the synth on the beat.
+    // Synth-only voices — held notes and chord detection stay yours.
+    const bkRow = el('div', 'row');
+    this.bkSel = el('select');
+    for (const k of Object.keys({
+      'C–G–Am–F': 1, 'I–V–vi–IV in G': 1, 'ii–V–I in C': 1, '12-bar blues in E': 1 })) {
+      this.bkSel.append(el('option', '', `backing: ${k}`));
+    }
+    this.bkBtn = el('button', '', '▶ play');
+    this.bkBtn.onclick = () => this.backing ? this.stopBacking() : this.startBacking();
+    bkRow.append(this.bkSel, this.bkBtn);
+    panel.append(bkRow);
     this.debounce = null;
     this.refresh();
   }
-  deactivate() {}
+  deactivate() { this.stopBacking(); }
+
+  startBacking() {
+    const map = {
+      'backing: C–G–Am–F': ['C maj', 'G maj', 'A min', 'F maj'],
+      'backing: I–V–vi–IV in G': ['G maj', 'D maj', 'E min', 'C maj'],
+      'backing: ii–V–I in C': ['D min', 'G 7', 'C maj'],
+      'backing: 12-bar blues in E': ['E maj', 'A maj', 'B 7', 'A maj'],
+    };
+    this.backing = { seq: map[this.bkSel.value] || map['backing: C–G–Am–F'], ix: 0, timer: null };
+    this.bkBtn.textContent = '■ stop';
+    const bar = () => {
+      if (!this.backing) return;
+      const bpm = Math.max(40, Math.min(220, +document.getElementById('bpm').value || 80));
+      const barMs = (60000 / bpm) * 4;
+      const shape = CHORD_SHAPES[this.backing.seq[this.backing.ix % this.backing.seq.length]];
+      this.backing.ix++;
+      if (shape) {
+        let d = 0;
+        for (const [s, f] of Object.entries(shape)) {
+          if (f == null) continue;
+          const str = +s, midi = OPEN_MIDI[str] + f;
+          setTimeout(() => this.app.synth.noteOn(`bk${str}`, midi, 72, str), d);
+          setTimeout(() => this.app.synth.noteOff(`bk${str}`, midi), d + barMs - 120);
+          d += 22;
+        }
+      }
+      this.backing.timer = setTimeout(bar, barMs);
+    };
+    bar();
+  }
+
+  stopBacking() {
+    if (!this.backing) return;
+    clearTimeout(this.backing.timer);
+    this.backing = null;
+    for (let s = 1; s <= 6; s++) this.app.synth.noteOff(`bk${s}`, 0);
+    this.bkBtn.textContent = '▶ play';
+  }
+
   onNotesChange() {
     clearTimeout(this.debounce);
     this.debounce = setTimeout(() => this.refresh(), 70);
@@ -237,7 +288,9 @@ export class ScaleDrill {
     this.modeSel = el('select');
     this.modeSel.append(el('option', '', 'freeform (any scale tone)'));
     this.modeSel.append(el('option', '', 'run (ascend & descend)'));
-    row.append(this.keySel, this.scaleSel, this.modeSel);
+    const hear = el('button', '', 'hear scale');
+    hear.onclick = () => this.hearScale();
+    row.append(this.keySel, this.scaleSel, this.modeSel, hear);
     panel.append(row);
     this.feedback = el('div', 'verdict', '');
     this.statLine = el('div', 'stats', '');
@@ -249,6 +302,15 @@ export class ScaleDrill {
     this.scaleSel.onchange = rebuild;
     this.modeSel.onchange = rebuild;
     this.build();
+  }
+
+  hearScale() {
+    const run = scaleRun(this.rootPc(), this.scaleSel.value, 0, 6);
+    run.forEach((p, i) => {
+      const midi = OPEN_MIDI[p.string] + p.fret;
+      setTimeout(() => this.app.synth.noteOn('sc', midi, 84, p.string), i * 220);
+      setTimeout(() => this.app.synth.noteOff('sc', midi), i * 220 + 190);
+    });
   }
 
   rootPc() {
@@ -391,7 +453,8 @@ export class Quiz {
     this.score = { tries: 0, hits: 0, streak: 0, latencies: [] };
     const row = el('div', 'row');
     this.kindSel = el('select');
-    for (const [v, label] of [['mixed', 'mixed drills'], ['note', 'note names'], ['spot', 'exact positions']]) {
+    for (const [v, label] of [['mixed', 'mixed drills'], ['note', 'note names'],
+      ['spot', 'exact positions'], ['bend', 'bend targets'], ['arp', 'arpeggio runs']]) {
       this.kindSel.append(el('option', '', label));
       this.kindSel.lastChild.value = v;
     }
@@ -408,53 +471,116 @@ export class Quiz {
     this.ask();
   }
 
-  deactivate() {}
+  deactivate() { this.app.fretboard.targets = null; }
 
   ask() {
-    const kinds = { note: true, spot: true };
     let kind = this.kindSel.value;
-    if (kind === 'mixed') kind = Math.random() < 0.5 ? 'note' : 'spot';
+    if (kind === 'mixed') kind = ['note', 'spot', 'bend', 'arp'][Math.floor(Math.random() * 4)];
     this.promptT = performance.now();
+    this.app.fretboard.targets = null;
     if (kind === 'note') {
       this.target = { kind, pc: Math.floor(Math.random() * 12) };
       this.prompt.textContent = `play any ${pcName(this.target.pc)}`;
-    } else {
+    } else if (kind === 'spot') {
       const str = 1 + Math.floor(Math.random() * 6);
       const fret = Math.floor(Math.random() * 8);
       this.target = { kind, str, fret, midi: OPEN_MIDI[str] + fret };
       this.prompt.textContent = `play fret ${fret} on the ${STRING_NAMES[str]} string`;
+    } else if (kind === 'bend') {
+      const steps = [0.5, 1, 1, 2][Math.floor(Math.random() * 4)];
+      this.target = { kind, steps };
+      this.prompt.textContent = `play a note, then bend it up ${steps === 0.5 ? 'a quarter' : steps === 1 ? 'a half' : 'a whole'} step`;
+    } else {
+      const chord = ['C maj', 'G maj', 'A min', 'E min', 'D maj'][Math.floor(Math.random() * 5)];
+      const shape = CHORD_SHAPES[chord] ?? {};
+      const seq = [6, 5, 4, 3, 2, 1].filter(s => shape[s] != null);
+      this.target = { kind, chord, seq, progress: 0 };
+      this.app.fretboard.targets = CHORD_SHAPES[chord] ?? null;
+      this.prompt.textContent = `pick ${chord} one string at a time, low to high`;
     }
     this.verdict.textContent = '';
+  }
+
+  hit(lat, label) {
+    this.score.tries++;
+    this.score.hits++;
+    this.score.streak++;
+    this.score.latencies.push(lat);
+    this.verdict.textContent = `✓ ${label} in ${lat.toFixed(1)}s`;
+    this.verdict.style.color = '#34d399';
+    this.showStats();
+    setTimeout(() => this.ask(), 700);
+  }
+
+  miss(label) {
+    this.score.tries++;
+    this.score.streak = 0;
+    this.verdict.textContent = label;
+    this.verdict.style.color = '#f87171';
+    this.showStats();
+  }
+
+  showStats() {
+    const latArr = this.score.latencies;
+    this.stats.textContent =
+      `${this.score.hits}/${this.score.tries} · streak ${this.score.streak}` +
+      (latArr.length ? ` · avg ${(latArr.reduce((a, b) => a + b) / latArr.length).toFixed(1)}s` : '');
   }
 
   onNoteOn(str, midi) {
     const t = this.target;
     if (!t) return;
+    if (t.kind === 'arp') {
+      if (t.done) return;
+      const shape = CHORD_SHAPES[t.chord];
+      const held = [...this.app.held.values()].find(n => n.midi === midi);
+      if (held?.inferred) {
+        // Inferred positions: picking order is unknowable, so accept the
+        // chord when every required tone is sounding at once.
+        const cf = chordFromLabel(t.chord);
+        const req = cf && chordGap(cf.root, cf.suffix, [...this.app.held.values()].map(n => n.midi));
+        if (req?.exact) { t.done = true; this.hit((performance.now() - this.promptT) / 1000, `${t.chord} tones`); }
+        return;
+      }
+      const wantStr = t.seq[t.progress];
+      const wantFret = shape?.[wantStr];
+      if (str === wantStr && wantFret != null && midi === OPEN_MIDI[wantStr] + wantFret) {
+        t.progress++;
+        this.verdict.textContent = `${STRING_NAMES[str]} ✓ (${t.progress}/${t.seq.length})`;
+        this.verdict.style.color = '#5eead4';
+        if (t.progress >= t.seq.length) {
+          t.done = true;
+          this.hit((performance.now() - this.promptT) / 1000, `${t.chord} run`);
+        }
+      } else {
+        t.progress = 0;
+        this.miss(`expected the ${STRING_NAMES[wantStr]} string next — run restarted`);
+      }
+      return;
+    }
     let ok = false;
     if (t.kind === 'note') {
       ok = ((midi % 12) + 12) % 12 === t.pc;
-    } else {
+    } else if (t.kind === 'spot') {
       const held = this.app.held.get(`s${str}`) || [...this.app.held.values()].find(n => n.midi === midi);
       ok = held && !held.inferred ? str === t.str && midi === t.midi : midi === t.midi;
+    } else {
+      return; // bend target: judged in onBend, not on onset
     }
     const lat = (performance.now() - this.promptT) / 1000;
-    this.score.tries++;
-    if (ok) {
-      this.score.hits++;
-      this.score.streak++;
-      this.score.latencies.push(lat);
-      this.verdict.textContent = `✓ ${midiName(midi)} in ${lat.toFixed(1)}s`;
-      this.verdict.style.color = '#34d399';
-      setTimeout(() => this.ask(), 700);
-    } else {
-      this.score.streak = 0;
-      this.verdict.textContent = `heard ${midiName(midi)} — try again`;
-      this.verdict.style.color = '#f87171';
+    if (ok) this.hit(lat, midiName(midi));
+    else this.miss(`heard ${midiName(midi)} — try again`);
+  }
+
+  onBend(str, semis) {
+    const t = this.target;
+    if (!t || t.kind !== 'bend' || t.done) return;
+    // Hit when any held note sits within ±12 cents of the target bend.
+    const hit = [...this.app.held.values()].some(n => Math.abs(n.bend - t.steps) <= 0.12);
+    if (hit) {
+      t.done = true;
+      this.hit((performance.now() - this.promptT) / 1000, `${t.steps} step bend`);
     }
-    const latArr = this.score.latencies;
-    this.stats.textContent =
-      `${this.score.hits}/${this.score.tries} · streak ${this.score.streak}` +
-      (latArr.length ? ` · avg ${(latArr.reduce((a, b) => a + b) / latArr.length).toFixed(1)}s` : '');
   }
 
   onNotesChange() {}

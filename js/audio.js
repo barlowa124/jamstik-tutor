@@ -218,6 +218,7 @@ export class SynthEngine {
   }
 
   bend(key, semis) {
+    if (!Number.isFinite(semis)) return;
     const v = this.voices.get(key);
     if (!v) return;
     for (const o of v.oscs) o.detune.setTargetAtTime(semis * 100, this.ctx.currentTime, 0.01);

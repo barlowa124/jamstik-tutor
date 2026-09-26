@@ -133,12 +133,14 @@ const handlers = {
     logMidi('all notes off');
   },
   onPitchBend(str, semis) {
+    if (!Number.isFinite(semis)) return;
     app.midiRec?.bend(str, semis);
     if (str == null) {
       app.synth.bendAll(semis);
       for (const n of app.held.values()) n.bend = semis;
       for (const f of app.fretboard.active.values()) f.bend = semis;
       logMidi(`bend all ${semis >= 0 ? '+' : ''}${semis.toFixed(2)}`);
+      app.mode?.onBend?.(str, semis);
       return;
     }
     const hit = [...app.held.entries()].find(([, v]) => v.str === str);
@@ -146,6 +148,7 @@ const handlers = {
     const f = app.fretboard.active.get(str);
     if (f) f.bend = semis;
     app.synth.bend(hit ? hit[0] : `s${str}`, semis);
+    app.mode?.onBend?.(str, semis);
     logMidi(`bend s${str} ${semis >= 0 ? '+' : ''}${semis.toFixed(2)}`);
   },
   onStateChange(text) { $('status').textContent = text; },
