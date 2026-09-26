@@ -460,7 +460,7 @@ export class Quiz {
     this.kindSel = el('select');
     for (const [v, label] of [['mixed', 'mixed drills'], ['note', 'note names'],
       ['spot', 'exact positions'], ['bend', 'bend targets'], ['arp', 'arpeggio runs'],
-      ['ear', 'intervals by ear']]) {
+      ['dyn', 'dynamics'], ['ear', 'intervals by ear'], ['cear', 'chords by ear']]) {
       this.kindSel.append(el('option', '', label));
       this.kindSel.lastChild.value = v;
     }
@@ -484,7 +484,19 @@ export class Quiz {
     const replay = el('button', '', '↻ hear again');
     replay.onclick = () => this.playEar();
     this.earRow.append(replay);
-    panel.append(this.earRow);
+    // Chord-quality answers for the 'cear' kind.
+    this.CEAR_NAMES = { maj: 'major', min: 'minor', 7: 'dom 7' };
+    this.cearRow = el('div', 'row');
+    this.cearRow.style.display = 'none';
+    for (const q of ['maj', 'min', '7']) {
+      const b = el('button', 'chip', this.CEAR_NAMES[q]);
+      b.onclick = () => this.answerCear(q);
+      this.cearRow.append(b);
+    }
+    const replay2 = el('button', '', '↻ hear again');
+    replay2.onclick = () => this.playEar();
+    this.cearRow.append(replay2);
+    panel.append(this.earRow, this.cearRow);
     panel.append(el('div', 'hint',
       'Note drills accept the pitch class on any string. Position drills ' +
       'need multi-channel MIDI — in single-channel mode they match pitch only.'));
@@ -495,16 +507,30 @@ export class Quiz {
 
   ask() {
     let kind = this.kindSel.value;
-    if (kind === 'mixed') kind = ['note', 'spot', 'bend', 'arp', 'ear'][Math.floor(Math.random() * 5)];
+    if (kind === 'mixed') {
+      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'ear', 'cear'][Math.floor(Math.random() * 7)];
+    }
     this.promptT = performance.now();
     this.app.fretboard.targets = null;
     this.earRow.style.display = kind === 'ear' ? '' : 'none';
-    if (kind === 'ear') {
-      const iv = 1 + Math.floor(Math.random() * 12);
-      const base = 50 + Math.floor(Math.random() * 14);
-      this.target = { kind, iv, base };
-      this.prompt.textContent = 'which interval?';
+    this.cearRow.style.display = kind === 'cear' ? '' : 'none';
+    if (kind === 'ear' || kind === 'cear') {
+      if (kind === 'ear') {
+        this.target = { kind, iv: 1 + Math.floor(Math.random() * 12), base: 50 + Math.floor(Math.random() * 14) };
+        this.prompt.textContent = 'which interval?';
+      } else {
+        const q = ['maj', 'min', '7'][Math.floor(Math.random() * 3)];
+        this.target = { kind, q, root: 48 + Math.floor(Math.random() * 12) };
+        this.prompt.textContent = 'major, minor, or dominant 7th?';
+      }
       this.playEar();
+      this.verdict.textContent = '';
+      return;
+    }
+    if (kind === 'dyn') {
+      const [name, lo, hi] = [['a soft note', 1, 54], ['a medium note', 55, 99], ['a hard note', 100, 127]][Math.floor(Math.random() * 3)];
+      this.target = { kind, name, lo, hi };
+      this.prompt.textContent = `play ${name}`;
       this.verdict.textContent = '';
       return;
     }
@@ -554,13 +580,23 @@ export class Quiz {
 
   showStats() {
     const latArr = this.score.latencies;
+    let wk = '';
+    try {
+      const all = JSON.parse(localStorage.getItem('jamstik-tutor-stats') || '{}');
+      let h = 0, t = 0;
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10);
+        if (all[d]?.quiz) { h += all[d].quiz.h; t += all[d].quiz.t; }
+      }
+      if (t) wk = ` · 7d ${h}/${t}`;
+    } catch { /* storage unavailable */ }
     this.stats.textContent =
       `${this.score.hits}/${this.score.tries} · streak ${this.score.streak}` +
       (latArr.length ? ` · avg ${(latArr.reduce((a, b) => a + b) / latArr.length).toFixed(1)}s` : '') +
-      (this.today ? ` · today ${this.today.h}/${this.today.t}` : '');
+      (this.today ? ` · today ${this.today.h}/${this.today.t}` : '') + wk;
   }
 
-  onNoteOn(str, midi) {
+  onNoteOn(str, midi, vel = 64) {
     const t = this.target;
     if (!t) return;
     if (t.kind === 'arp') {
@@ -592,6 +628,13 @@ export class Quiz {
       return;
     }
     let ok = false;
+    if (t.kind === 'dyn') {
+      ok = vel >= t.lo && vel <= t.hi;
+      const lat = (performance.now() - this.promptT) / 1000;
+      if (ok) this.hit(lat, `${t.name} (vel ${vel})`);
+      else this.miss(`velocity ${vel} — ${t.name} is ${t.lo}-${t.hi}`);
+      return;
+    }
     if (t.kind === 'note') {
       ok = ((midi % 12) + 12) % 12 === t.pc;
     } else if (t.kind === 'spot') {
@@ -607,14 +650,31 @@ export class Quiz {
 
   playEar() {
     const t = this.target;
-    if (!t || t.kind !== 'ear') return;
+    if (!t) return;
     this.app.synth.ensure();
-    const play = (midi, at, dur) => {
-      setTimeout(() => this.app.synth.noteOn('ear', midi, 92, null), at);
-      setTimeout(() => this.app.synth.noteOff('ear', midi), at + dur);
+    const play = (key, midi, at, dur) => {
+      setTimeout(() => this.app.synth.noteOn(key, midi, 92, null), at);
+      setTimeout(() => this.app.synth.noteOff(key, midi), at + dur);
     };
-    play(t.base, 0, 800);
-    play(t.base + t.iv, 650, 1000);
+    if (t.kind === 'ear') {
+      play('ear', t.base, 0, 800);
+      play('ear2', t.base + t.iv, 650, 1000);
+    } else if (t.kind === 'cear') {
+      const intervals = { maj: [0, 4, 7], min: [0, 3, 7], 7: [0, 4, 7, 10] }[t.q];
+      intervals.forEach((iv, i) => play(`ce${i}`, t.root + iv, 0, 1400));
+    }
+  }
+
+  answerCear(q) {
+    const t = this.target;
+    if (!t || t.kind !== 'cear' || t.done) return;
+    const lat = (performance.now() - this.promptT) / 1000;
+    if (q === t.q) {
+      t.done = true;
+      this.hit(lat, this.CEAR_NAMES[t.q]);
+    } else {
+      this.miss(`that was ${this.CEAR_NAMES[q]} — listen again`);
+    }
   }
 
   answerEar(iv) {
@@ -813,7 +873,18 @@ export class RiffDrill {
 }
 
 // Strum on the beat against a click; each onset is scored by its
-// distance to the nearest beat on the grid.
+// distance to the nearest beat on the grid.// Strum on the click. Free grids score each onset's offset in ms;
+// named patterns split the bar into eighth-note slots and score
+// which slots got hits.
+const STRUM_PATTERNS = {
+  'free quarters': { free: 1 },
+  'free eighths': { free: 2 },
+  'steady 8ths': { pat: [1, 1, 1, 1, 1, 1, 1, 1] },
+  'on the quarters': { pat: [1, 0, 1, 0, 1, 0, 1, 0] },
+  'folk strum': { pat: [1, 0, 1, 1, 0, 1, 1, 0] },
+  'syncopated': { pat: [1, 0, 0, 1, 0, 0, 1, 0] },
+};
+
 export class RhythmDrill {
   constructor(app) { this.app = app; }
 
@@ -821,23 +892,60 @@ export class RhythmDrill {
     panel.innerHTML = '';
     panel.append(el('h2', '', 'rhythm drill'));
     const row = el('div', 'row');
-    this.btn = el('button', '', '▶ start click');
+    this.btn = el('button', '', '\u25b6 start click');
     this.btn.onclick = () => this.running ? this.stop() : this.start();
-    this.subSel = el('select');
-    for (const [v, l] of [['1', 'quarter notes'], ['2', 'eighth notes']]) {
-      const o = el('option', '', l);
-      o.value = v;
-      this.subSel.append(o);
+    this.patSel = el('select');
+    for (const k of Object.keys(STRUM_PATTERNS)) this.patSel.append(el('option', '', k));
+    this.patSel.onchange = () => this.buildSlots();
+    row.append(this.btn, this.patSel);
+    this.slotRow = el('div', 'row');
+    this.slots = [];
+    for (let i = 0; i < 8; i++) {
+      const c = el('span', 'chip', '\u00b7');
+      c.style.cursor = 'default';
+      this.slotRow.append(c);
+      this.slots.push(c);
     }
-    row.append(this.btn, this.subSel);
     this.verdict = el('div', 'verdict');
     this.stats = el('div', 'stats');
-    panel.append(row, this.verdict, this.stats);
+    panel.append(row, this.slotRow, this.verdict, this.stats);
     panel.append(el('div', 'hint',
-      'Hit any note in time with the click. Offsets under 70ms score on-beat. ' +
-      'Change BPM in the header.'));
+      'Free grids score every onset in ms. Patterns score each eighth ' +
+      'slot: green hit, red missed target, amber extra hit on a rest. ' +
+      'BPM is the header field.'));
     this.running = false;
+    this.resetCounters();
+    this.buildSlots();
+  }
+
+  get pat() {
+    const p = STRUM_PATTERNS[this.patSel.value];
+    return p.pat || null;
+  }
+
+  get freeDiv() {
+    const p = STRUM_PATTERNS[this.patSel.value];
+    return p.free || 0;
+  }
+
+  resetCounters() {
+    this.barsDone = 0;
     this.offs = [];
+    this.pendingEdge = false;
+    this.stats.textContent = '';
+  }
+
+  buildSlots() {
+    const pat = this.pat;
+    this.slotState = Array(8).fill(0); // 0 pending, 1 hit, 2 missed, 3 extra
+    this.curSlot = 0;
+    for (let i = 0; i < 8; i++) {
+      const c = this.slots[i];
+      const target = pat ? pat[i] === 1 : true;
+      c.textContent = pat ? (target ? '\u25cf' : '\u25cb') : '\u00b7';
+      c.style.opacity = pat ? (target ? 1 : 0.4) : 0.4;
+      c.style.color = '#94a3b8';
+    }
   }
 
   start() {
@@ -845,39 +953,126 @@ export class RhythmDrill {
     this.metro = this.metro || new Metronome(this.app.synth.ctx);
     this.metro.bpm = +document.getElementById('bpm').value || 80;
     this.beatTimes = [];
+    this.base = null;
+    this.barIx = -1;
     this.metro.onTick = (b, t) => {
       const wall = performance.now() + (t - this.app.synth.ctx.currentTime) * 1000;
-      this.beatTimes.push(wall);
-      if (this.beatTimes.length > 16) this.beatTimes.shift();
+      if (this.base === null) this.base = wall; // first tick is beat 0
+      this.beatTimes.push({ beat: b, wall });
+      if (this.beatTimes.length > 20) this.beatTimes.shift();
     };
     this.metro.start();
     this.running = true;
-    this.btn.textContent = '■ stop click';
-    this.verdict.textContent = 'on the click —';
+    this.btn.textContent = '\u25a0 stop click';
+    this.verdict.textContent = 'on the click \u2014';
     this.verdict.style.color = '#94a3b8';
+    this.resetCounters();
+    this.buildSlots();
   }
 
   stop() {
     this.metro?.stop();
     this.running = false;
-    this.btn.textContent = '▶ start click';
-    this.verdict.textContent = '';
+    this.btn.textContent = '\u25b6 start click';
   }
 
   deactivate() { this.stop(); }
 
+  // Slot arithmetic from the first beat tick: bar N starts at
+  // base + N * 4 beats. Never re-anchors, so frame() cannot spin
+  // phantom bars while waiting for the next beat-0 tick.
+  slotPos(now) {
+    if (this.base === null) return null;
+    const period = 60000 / this.metro.bpm / 2;
+    const f = (now - this.base) / period;
+    return { f, ix: Math.floor(f), slot: ((Math.floor(f) % 8) + 8) % 8, period };
+  }
+
+  finalizeSlot(ix) {
+    if (this.slotState[ix] !== 0) return;
+    this.slotState[ix] = this.pat[ix] ? 2 : 0;
+    const c = this.slots[ix];
+    if (this.pat[ix]) { c.style.color = '#f87171'; c.style.opacity = 1; }
+  }
+
+  frame() {
+    if (!this.running || !this.pat) return;
+    const pos = this.slotPos(performance.now());
+    if (!pos) return;
+    const barIx = Math.floor(pos.ix / 8);
+    if (this.barIx === -1) this.barIx = barIx;
+    if (barIx !== this.barIx) {
+      // The previous bar is done: finalize all its slots and score it.
+      for (let i = 0; i < 8; i++) this.finalizeSlot(i);
+      const hits = this.slotState.filter((s, i) => s === 1 && this.pat[i]).length;
+      const targets = this.pat.filter(Boolean).length;
+      const extra = this.slotState.filter((s, i) => s === 3 && !this.pat[i]).length;
+      this.barsDone++;
+      this.stats.textContent =
+        `bar ${this.barsDone}: ${hits}/${targets} on-pattern` +
+        (extra ? `, ${extra} extra` : '');
+      this.barIx = barIx;
+      this.buildSlots();
+      // An onset landed just ahead of slot 0 while the previous bar was
+      // still the current one — it belongs to this bar's first slot.
+      if (this.pendingEdge) {
+        this.pendingEdge = false;
+        this.slotState[0] = this.pat[0] ? 1 : 3;
+        this.slots[0].style.color = this.pat[0] ? '#34d399' : '#fbbf24';
+        this.slots[0].style.opacity = 1;
+        this.curSlot = 1;
+      }
+    }
+    // Finalize elapsed slots in the current bar.
+    while (this.curSlot < pos.slot) {
+      this.finalizeSlot(this.curSlot);
+      this.curSlot++;
+    }
+  }
+
   onNoteOn() {
-    if (!this.running || !this.beatTimes?.length) return;
+    if (!this.running) return;
     const now = performance.now();
-    const div = +this.subSel.value;
-    // Header BPM is live-editable: keep click tempo and grid in sync.
     this.metro.bpm = +document.getElementById('bpm').value || this.metro.bpm;
+    const pat = this.pat;
+    if (pat) {
+      const pos = this.slotPos(now);
+      if (!pos) return;
+      const f = pos.f - Math.floor(pos.f / 8) * 8;
+      const ix = Math.round(f);
+      if (ix < 0) return;
+      if (ix >= 8) {
+        // Early hit on next bar's slot 0: remember it until the bar rolls.
+        if (Math.abs(f - 8) * pos.period <= 140) this.pendingEdge = true;
+        return;
+      }
+      if (Math.abs(f - ix) * pos.period <= 140) {
+        if (this.pat[ix]) {
+          this.slotState[ix] = 1;
+          this.slots[ix].style.color = '#34d399';
+          this.slots[ix].style.opacity = 1;
+          this.verdict.textContent = `slot ${ix + 1} hit ${Math.round((f - ix) * pos.period)}ms`;
+          this.verdict.style.color = '#34d399';
+        } else {
+          this.slotState[ix] = 3;
+          this.slots[ix].style.color = '#fbbf24';
+          this.slots[ix].style.opacity = 1;
+          this.verdict.textContent = `slot ${ix + 1} was a rest`;
+          this.verdict.style.color = '#fbbf24';
+        }
+      } else {
+        this.verdict.textContent = 'off the grid';
+        this.verdict.style.color = '#f87171';
+      }
+      return;
+    }
+    // Free grid: signed offset to nearest grid point in ms.
+    const div = this.freeDiv || 1;
     const period = (60000 / this.metro.bpm) / div;
-    // Nearest grid point: beats plus subdivisions between consecutive beats.
     let best = null;
-    for (const bt of this.beatTimes) {
+    for (const { wall } of this.beatTimes || []) {
       for (let k = 0; k < div; k++) {
-        const d = now - (bt + k * period);
+        const d = now - (wall + k * period);
         if (Math.abs(d) < Math.abs(best ?? Infinity)) best = d;
       }
     }
@@ -886,12 +1081,12 @@ export class RhythmDrill {
     const onBeat = Math.abs(off) <= 70;
     this.offs.push(off);
     if (this.offs.length > 24) this.offs.shift();
-    this.verdict.textContent = onBeat ? 'on the beat ✓' : `${Math.abs(off)}ms ${off > 0 ? 'late' : 'early'}`;
+    this.verdict.textContent = onBeat ? 'on the beat \u2713' : `${Math.abs(off)}ms ${off > 0 ? 'late' : 'early'}`;
     this.verdict.style.color = onBeat ? '#34d399' : '#fbbf24';
     const avg = this.offs.reduce((a, b) => a + b) / this.offs.length;
     const hits = this.offs.filter(o => Math.abs(o) <= 70).length;
     this.stats.textContent =
-      `${hits}/${this.offs.length} on-beat · avg ${avg >= 0 ? '+' : ''}${avg.toFixed(0)}ms ` +
+      `${hits}/${this.offs.length} on-beat \u00b7 avg ${avg >= 0 ? '+' : ''}${avg.toFixed(0)}ms ` +
       `(${avg > 8 ? 'dragging' : avg < -8 ? 'pushing ahead' : 'centered'})`;
   }
 }

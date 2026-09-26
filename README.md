@@ -79,10 +79,13 @@ sweep. You can also click frets on the board directly.
   The board lights the current position. Wrong notes coach the expected
   pitch and string but never reset your place. `hear it` auditions the
   pattern. In single-channel mode steps match by pitch.
-- **Rhythm drill**: strum on the click. Each onset is scored against
-  the beat grid (quarter or eighth notes). Under 70ms counts on-beat,
-  otherwise you see the signed offset in ms and a running average
-  labeled dragging, pushing ahead, or centered.
+- **Rhythm drill**: strum on the click. Free grids (quarters or
+  eighths) score each onset's signed offset in ms with a running
+  average labeled dragging, pushing ahead, or centered. Named strum
+  patterns (steady 8ths, on the quarters, folk strum, syncopated) split
+  the bar into eighth-note slots shown as a chip row. Green for a hit
+  on a target slot, red for a missed target, amber for an extra hit on
+  a rest. Each completed bar reports on-pattern hits and extras.
 - **Quiz**: fretboard-knowledge drills. *Note names* asks for a pitch
   class anywhere ("play any F#"). *Exact positions* asks for a
   string/fret pair. With multi-channel MIDI it checks string and fret.
@@ -92,9 +95,12 @@ sweep. You can also click frets on the board directly.
   runs* draws a chord shape and times a low-to-high single-string pick.
   In single-channel mode it accepts all chord tones sounding together.
   *Intervals by ear* plays two notes through the synth and you name the
-  interval from buttons, no guitar needed.
-  Stats shown: `hits/tries`, streak, average response seconds, and a
-  running `today` tally. Daily drill counts persist in `localStorage`.
+  interval from buttons, no guitar needed. *Chords by ear* plays a
+  triad answered by quality (major / minor / dominant 7th). *Dynamics*
+  prompts for a pick velocity band and scores the MIDI velocity.
+  Stats shown: `hits/tries`, streak, average response seconds, a
+  running `today` tally, and a 7-day total. Daily drill counts persist
+  in `localStorage`.
 
 ## Sounds
 

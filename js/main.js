@@ -110,7 +110,7 @@ const handlers = {
     app.midiRec?.add(true, inferred ? null : str, midi, vel, rawMidi);
     app.synth.noteOn(key, midi, vel, str);
     app.fretboard.active.set(str, { midi, bend: 0 });
-    app.mode?.onNoteOn?.(str, midi);
+    app.mode?.onNoteOn?.(str, midi, vel);
     app.mode?.onNotesChange?.();
     logMidi(`on  s${str}${inferred ? '?' : ''} ${midiName(midi)} v${vel}`);
   },
