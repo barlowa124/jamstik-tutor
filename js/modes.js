@@ -462,7 +462,7 @@ export class Quiz {
     for (const [v, label] of [['mixed', 'mixed drills'], ['note', 'note names'],
       ['spot', 'exact positions'], ['bend', 'bend targets'], ['arp', 'arpeggio runs'],
       ['dyn', 'dynamics'], ['hold', 'hold duration'], ['ivb', 'intervals on board'],
-      ['read', 'staff reading'],
+      ['read', 'staff reading'], ['all', 'fretboard sweep'],
       ['ear', 'intervals by ear'], ['cear', 'chords by ear']]) {
       this.kindSel.append(el('option', '', label));
       this.kindSel.lastChild.value = v;
@@ -473,7 +473,9 @@ export class Quiz {
     this.prompt = el('div', 'big-readout', '');
     this.verdict = el('div', 'verdict', '');
     this.stats = el('div', 'stats', '');
-    panel.append(row, this.prompt, this.verdict, this.stats);
+    this.weekCv = el('canvas', 'week-bars');
+    this.weekCv.title = 'hit rate per day, last 7 days';
+    panel.append(row, this.prompt, this.verdict, this.stats, this.weekCv);
     // Interval answer grid, only meaningful during ear targets.
     this.IV_NAMES = ['minor 2nd', 'major 2nd', 'minor 3rd', 'major 3rd', 'perfect 4th',
       'tritone', 'perfect 5th', 'minor 6th', 'major 6th', 'minor 7th', 'major 7th', 'octave'];
@@ -513,7 +515,7 @@ export class Quiz {
   ask() {
     let kind = this.kindSel.value;
     if (kind === 'mixed') {
-      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'read', 'ear', 'cear'][Math.floor(Math.random() * 10)];
+      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'read', 'all', 'ear', 'cear'][Math.floor(Math.random() * 11)];
     }
     this.promptT = performance.now();
     this.app.fretboard.targets = null;
@@ -568,6 +570,14 @@ export class Quiz {
       drawStaff(this.staffCv, [midi]);
       this.prompt.textContent = 'play the written note (exact octave)';
       this.verdict.textContent = '';
+      return;
+    }
+    if (kind === 'all') {
+      const pc = Math.floor(Math.random() * 12);
+      this.target = { kind, pc, found: new Set(), deadline: performance.now() + 20000 };
+      this.prompt.textContent = `play every ${pcName(pc)} on the board — 20s`;
+      this.verdict.textContent = 'go';
+      this.verdict.style.color = '#5eead4';
       return;
     }
     if (kind === 'note') {
@@ -625,6 +635,28 @@ export class Quiz {
         if (all[d]?.quiz) { h += all[d].quiz.h; t += all[d].quiz.t; }
       }
       if (t) wk = ` · 7d ${h}/${t}`;
+      const cv = this.weekCv;
+      const g = cv.getContext('2d');
+      const dpr = devicePixelRatio || 1;
+      const w = cv.clientWidth, h2 = cv.clientHeight;
+      if (w && h2) {
+        if (cv.width !== w * dpr) { cv.width = w * dpr; cv.height = h2 * dpr; }
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+        g.clearRect(0, 0, w, h2);
+        for (let i = 0; i < 7; i++) {
+          const day = all[new Date(Date.now() - (6 - i) * 864e5).toISOString().slice(0, 10)] || {};
+          const tot = Object.values(day).reduce((a, v) => a + v.t, 0);
+          const hits = Object.values(day).reduce((a, v) => a + v.h, 0);
+          const bw = w / 7;
+          const bh = tot ? (hits / tot) * (h2 - 8) : 0;
+          g.fillStyle = tot ? (hits / tot >= 0.7 ? '#34d399' : hits / tot >= 0.4 ? '#fbbf24' : '#f87171') : '#1e293b';
+          g.fillRect(i * bw + 3, h2 - 8 - bh, bw - 6, tot ? Math.max(2, bh) : 2);
+          g.fillStyle = '#475569';
+          g.font = '7px sans-serif';
+          g.textAlign = 'center';
+          g.fillText('SMTWTFS'[new Date(Date.now() - (6 - i) * 864e5).getDay()], i * bw + bw / 2, h2 - 1);
+        }
+      }
     } catch { /* storage unavailable */ }
     this.stats.textContent =
       `${this.score.hits}/${this.score.tries} · streak ${this.score.streak}` +
@@ -632,8 +664,36 @@ export class Quiz {
       (this.today ? ` · today ${this.today.h}/${this.today.t}` : '') + wk;
   }
 
+  frame() {
+    const t = this.target;
+    if (!t || t.kind !== 'all' || t.done) return;
+    const left = t.deadline - performance.now();
+    if (left <= 0) {
+      t.done = true;
+      this.app.fretboard.targets = null;
+      this.hit((performance.now() - this.promptT) / 1000,
+        `found ${t.found.size} ${pcName(t.pc)} position${t.found.size === 1 ? '' : 's'}`);
+    } else {
+      // Countdown lives on stats so coaching in verdict stays visible.
+      this.stats.textContent = `${t.found.size} found · ${Math.ceil(left / 1000)}s left`;
+    }
+  }
+
   onNoteOn(str, midi, vel = 64) {
     const t = this.target;
+    if (t && t.kind === 'all' && !t.done) {
+      if (((midi % 12) + 12) % 12 !== t.pc) {
+        this.verdict.textContent = `heard ${midiName(midi)} — only ${pcName(t.pc)} counts`;
+        this.verdict.style.color = '#f87171';
+        return;
+      }
+      const key = str != null ? `${str}:${midi - OPEN_MIDI[str]}` : `m${midi}`;
+      const isNew = !t.found.has(key);
+      t.found.add(key);
+      this.verdict.style.color = '#5eead4';
+      this.verdict.textContent = isNew ? `${midiName(midi)} — that's one` : 'already found — another spot';
+      return;
+    }
     if (!t) return;
     if (t.kind === 'arp') {
       if (t.done) return;
@@ -864,6 +924,10 @@ const RIFFS = {
   'G run walk-down': [[6, 3], [5, 0], [5, 2], [4, 0]],
   'travis pick in C': [[5, 3], [3, 0], [4, 2], [3, 0], [6, 3], [3, 0], [4, 2], [3, 0]],
   'power riff in E': [[6, 0], [6, 0], [6, 3], [6, 0], [5, 5], [5, 7]],
+  'ode to joy (melody)': [[1, 0], [1, 0], [1, 1], [1, 3], [1, 3], [1, 1], [1, 0], [2, 3],
+    [2, 1], [2, 1], [2, 3], [1, 0], [1, 0], [2, 3], [2, 3]],
+  'when the saints': [[2, 1], [1, 0], [1, 1], [1, 3], [2, 1], [1, 0], [1, 1], [1, 3],
+    [1, 0], [2, 1], [1, 0], [2, 3]],
 };
 
 export class RiffDrill {

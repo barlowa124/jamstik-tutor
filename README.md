@@ -75,8 +75,9 @@ sweep. You can also click frets on the board directly.
   and the panel previews the next chord. The clock runs until the held
   notes resolve to exactly the target's chord tones. Stats track switch
   times. Same four progressions as the trainer.
-- **Riff drills**: short picking patterns (blues shuffle, pentatonic
-  walk-up, G run, travis pick, power riff) judged one step at a time.
+- **Riff drills**: picking patterns and melodies (blues shuffle, pentatonic
+  walk-up, G run, travis pick, power riff, ode to joy, when the saints)
+  judged one step at a time.
   The board lights the current position. Wrong notes coach the expected
   pitch and string but never reset your place. `hear it` auditions the
   pattern. In single-channel mode steps match by pitch.
@@ -104,8 +105,12 @@ sweep. You can also click frets on the board directly.
   asks for the note a named interval above it (m3 through P5).
   *Staff reading* shows a notehead on a treble staff and requires the
   exact octave. Miss feedback names the octave distance.
+  *Fretboard sweep* gives 20s to find every position of one pitch
+  class, scoring distinct spots found (unique pitches in
+  single-channel mode).
   Stats shown: `hits/tries`, streak, average response seconds, a
-  running `today` tally, and a 7-day total. Daily drill counts persist
+  running `today` tally, a 7-day total, and a per-day hit-rate bar row.
+  Daily drill counts persist
   in `localStorage`, and the header shows a per-kind today line plus a
   consecutive-days streak.
 
