@@ -67,7 +67,7 @@ sweep. You can also click frets on the board directly.
   unmuted string). Progressions: C G Am F, I V vi IV in G, ii V I in C,
   12-bar blues in E.
 - **Scale drills**: lights every in-key position on the board, labeled
-  by degree (R, b3, 5, and so on). *Freeform*
+  by degree name such as R or b3. *Freeform*
   scores each note as in or out of key. *Run* walks a position box up
   and down and tracks position-accurate progress. *Hear scale* auditions
   the box run through the current preset.
@@ -103,7 +103,7 @@ sweep. You can also click frets on the board directly.
   BPM, judged on release timing. *Intervals on board* lights a fret and
   asks for the note a named interval above it (m3 through P5).
   *Staff reading* shows a notehead on a treble staff and requires the
-  exact octave — miss feedback names the octave distance.
+  exact octave; miss feedback names the octave distance.
   Stats shown: `hits/tries`, streak, average response seconds, a
   running `today` tally, and a 7-day total. Daily drill counts persist
   in `localStorage`, and the header shows a per-kind today line plus a
