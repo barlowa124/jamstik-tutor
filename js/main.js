@@ -259,7 +259,7 @@ function setMode(name) {
 // ── Demo panel (virtual device) ─────────────────────────────────────────
 function buildDemoPanel() {
   const p = $('demo-panel');
-  p.innerHTML = '<div class="hint">demo device — strum a chord or click frets on the board</div>';
+  p.innerHTML = '<div class="hint">demo device. Strum a chord or click frets on the board</div>';
   const row = document.createElement('div');
   row.className = 'row';
   for (const [label, shape] of Object.entries({

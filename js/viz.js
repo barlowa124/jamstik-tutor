@@ -288,5 +288,5 @@ export function drawStrings(canvas, lanes, ccSeen, now, names, windowMs = 6000) 
   g.strokeRect(0.5, 0.5, w - 1, h - 1);
   g.fillStyle = '#64748b';
   g.font = '9px monospace';
-  g.fillText(ccSeen ? 'CC11 string amplitude' : 'attack/release — no CC11 seen', labelW, h - 3);
+  g.fillText(ccSeen ? 'CC11 string amplitude' : 'attack/release, no CC11 seen', labelW, h - 3);
 }

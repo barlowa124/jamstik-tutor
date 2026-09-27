@@ -169,8 +169,8 @@ export class ChordTrainer {
 
     if (!this.standardTuning) {
       panel.append(el('div', 'hint',
-        `Tuning is ${currentTuningName()} — shape diagrams assume standard; ` +
-        `verdicts still check chord tones.`));
+        `Tuning is ${currentTuningName()}. Shape diagrams assume standard. ` +
+        `Verdicts still check chord tones.`));
     }
     this.target = el('div', 'big-readout', '');
     this.verdict = el('div', 'verdict', '');
@@ -255,12 +255,12 @@ export class ChordTrainer {
       for (const [s, f] of Object.entries(shape)) {
         const held = heldArr.find(n => n.str === +s);
         if (f === null) {
-          if (held) perString.push(`${STRING_NAMES[s]} string should be muted — heard ${midiName(held.midi)}`);
+          if (held) perString.push(`${STRING_NAMES[s]} string should be muted, heard ${midiName(held.midi)}`);
         } else if (!held) {
-          perString.push(`${STRING_NAMES[s]} string silent — expected fret ${f}`);
+          perString.push(`${STRING_NAMES[s]} string silent, expected fret ${f}`);
         } else {
           const heard = held.midi - OPEN_MIDI[s];
-          if (heard !== f) perString.push(`${STRING_NAMES[s]} fret ${heard} — expected ${f}`);
+          if (heard !== f) perString.push(`${STRING_NAMES[s]} fret ${heard}, expected ${f}`);
         }
       }
     }
@@ -270,7 +270,7 @@ export class ChordTrainer {
       this.score.hits++;
       this.score.streak++;
       this.score.latencies.push(latency);
-      this.verdict.textContent = `✓ ${this.cur} in ${latency.toFixed(1)}s — release to continue`;
+      this.verdict.textContent = `✓ ${this.cur} in ${latency.toFixed(1)}s. Release to continue`;
       this.verdict.style.color = '#34d399';
       this.judged = true;
     } else {
@@ -348,7 +348,7 @@ export class ScaleDrill {
     this.stats = { hits: 0, misses: 0 };
     this.feedback.textContent = this.runMode
       ? `play the ${this.keySel.value} ${scale} run, low E to high e and back`
-      : `improvise in ${this.keySel.value} ${scale} — lit dots are in-key`;
+      : `improvise in ${this.keySel.value} ${scale}, lit dots are in-key`;
     this.progress.textContent = '';
     this.updateStats();
   }
@@ -360,7 +360,7 @@ export class ScaleDrill {
     if (!this.runMode) {
       const inKey = this.scalePcs.includes(pc);
       inKey ? this.stats.hits++ : this.stats.misses++;
-      this.feedback.textContent = inKey ? `${midiName(midi)} ✓` : `${midiName(midi)} — out of key`;
+      this.feedback.textContent = inKey ? `${midiName(midi)} ✓` : `${midiName(midi)}, out of key`;
       this.feedback.style.color = inKey ? '#34d399' : '#f87171';
       this.updateStats();
       return;
@@ -373,7 +373,7 @@ export class ScaleDrill {
       this.runIx++;
       this.feedback.style.color = '#34d399';
       this.feedback.textContent = this.runIx >= this.run.length
-        ? `run complete — ${this.stats.hits}/${this.stats.hits + this.stats.misses} clean`
+        ? `run complete, ${this.stats.hits}/${this.stats.hits + this.stats.misses} clean`
         : `${midiName(midi)} ✓  next: ${STRING_NAMES[this.run[this.runIx].string]} string fret ${this.run[this.runIx].fret}`;
       if (this.runIx >= this.run.length) this.runIx = 0;
     } else {
@@ -382,7 +382,7 @@ export class ScaleDrill {
       const rightNote = pc === (wantMidi % 12);
       this.feedback.textContent = rightNote
         ? `${midiName(midi)} is in the scale, but the run wants ${STRING_NAMES[want.string]} fret ${want.fret}`
-        : `expected ${midiName(wantMidi)} on ${STRING_NAMES[want.string]} string fret ${want.fret} — heard ${midiName(midi)}`;
+        : `expected ${midiName(wantMidi)} on ${STRING_NAMES[want.string]} string fret ${want.fret}, heard ${midiName(midi)}`;
     }
     this.progress.textContent = `position ${this.runIx}/${this.run.length}`;
     this.updateStats();
@@ -463,6 +463,14 @@ export class Tuner {
 // ── Note quiz ───────────────────────────────────────────────────────────
 // Fretboard-knowledge drills: "play any F#" or "play fret 7 on the D
 // string". Tracks latency and streaks.
+
+// 'sus' and 'mute' drill parameters; CC11 amplitude arrives 0-1.
+const SUS_AMP_FLOOR = 0.15;
+const MUTE_AMP_FLOOR = 0.1;
+const MUTE_WINDOW_MS = 250;
+const MUTE_TIMEOUT_MS = 1500;
+const QUIZ_REASK_MS = 700;
+
 export class Quiz {
   constructor(app) { this.app = app; }
 
@@ -525,7 +533,7 @@ export class Quiz {
     panel.append(this.earRow, this.cearRow, this.dictRow, this.staffCv);
     panel.append(el('div', 'hint',
       'Note drills accept the pitch class on any string. Position drills ' +
-      'need multi-channel MIDI — in single-channel mode they match pitch only.'));
+      'need multi-channel MIDI. In single-channel mode they match pitch only.'));
     this.ask();
   }
 
@@ -555,7 +563,7 @@ export class Quiz {
       } else {
         const q = ['maj', 'min', '7'][Math.floor(Math.random() * 3)];
         this.target = { kind, q, root: 48 + Math.floor(Math.random() * 12) };
-        this.prompt.textContent = 'major, minor, or dominant 7th?';
+        this.prompt.textContent = 'major, minor or dominant 7th?';
       }
       this.playEar();
       this.verdict.textContent = '';
@@ -587,7 +595,7 @@ export class Quiz {
       return;
     }
     if (kind === 'mute') {
-      this.target = { kind, window: 250 };
+      this.target = { kind, window: MUTE_WINDOW_MS };
       this.prompt.textContent = `play a note and choke it within ${this.target.window}ms`;
       this.verdict.textContent = '';
       return;
@@ -615,7 +623,7 @@ export class Quiz {
     if (kind === 'all') {
       const pc = Math.floor(Math.random() * 12);
       this.target = { kind, pc, found: new Set(), deadline: performance.now() + 20000 };
-      this.prompt.textContent = `play every ${pcName(pc)} on the board — 20s`;
+      this.prompt.textContent = `play every ${pcName(pc)} on the board in 20s`;
       this.verdict.textContent = 'go';
       this.verdict.style.color = '#5eead4';
       return;
@@ -669,7 +677,7 @@ export class Quiz {
     this.verdict.textContent = `✓ ${label} in ${lat.toFixed(1)}s`;
     this.verdict.style.color = '#34d399';
     this.showStats();
-    setTimeout(() => this.ask(), 700);
+    setTimeout(() => this.ask(), QUIZ_REASK_MS);
   }
 
   miss(label) {
@@ -735,9 +743,9 @@ export class Quiz {
       return;
     }
     if (t.kind === 'mute') {
-      if (this.mute?.active && performance.now() - this.mute.t0 > 1500) {
+      if (this.mute?.active && performance.now() - this.mute.t0 > MUTE_TIMEOUT_MS) {
         this.mute = null;
-        this.miss('still ringing — choke it');
+        this.miss('still ringing, choke it');
       }
       return;
     }
@@ -758,7 +766,7 @@ export class Quiz {
     const t = this.target;
     if (t && t.kind === 'all' && !t.done) {
       if (((midi % 12) + 12) % 12 !== t.pc) {
-        this.verdict.textContent = `heard ${midiName(midi)} — only ${pcName(t.pc)} counts`;
+        this.verdict.textContent = `heard ${midiName(midi)}, only ${pcName(t.pc)} counts`;
         this.verdict.style.color = '#f87171';
         return;
       }
@@ -766,7 +774,7 @@ export class Quiz {
       const isNew = !t.found.has(key);
       t.found.add(key);
       this.verdict.style.color = '#5eead4';
-      this.verdict.textContent = isNew ? `${midiName(midi)} — that's one` : 'already found — another spot';
+      this.verdict.textContent = isNew ? `${midiName(midi)}, that's one` : 'already found, another spot';
       return;
     }
     if (!t) return;
@@ -810,7 +818,7 @@ export class Quiz {
         }
       } else {
         t.progress = 0;
-        this.miss(`expected the ${STRING_NAMES[wantStr]} string next — run restarted`);
+        this.miss(`expected the ${STRING_NAMES[wantStr]} string next, run restarted`);
       }
       return;
     }
@@ -822,7 +830,7 @@ export class Quiz {
         this.verdict.textContent = 'holding… release on the count';
         this.verdict.style.color = '#5eead4';
       } else {
-        this.miss(`heard ${midiName(midi)} — need a ${pcName(t.pc)} to hold`);
+        this.miss(`heard ${midiName(midi)}, need a ${pcName(t.pc)} to hold`);
       }
       return;
     }
@@ -830,7 +838,7 @@ export class Quiz {
       ok = ((midi % 12) + 12) % 12 === t.pc;
       const lat = (performance.now() - this.promptT) / 1000;
       if (ok) this.hit(lat, midiName(midi));
-      else this.miss(`heard ${midiName(midi)} — the lit note plus ${t.iv} steps`);
+      else this.miss(`heard ${midiName(midi)}, the lit note plus ${t.iv} steps`);
       return;
     }
     if (t.kind === 'dict') {
@@ -841,14 +849,14 @@ export class Quiz {
         this.verdict.style.color = '#5eead4';
         if (t.ix >= t.midis.length) {
           t.done = true;
-          this.hit((performance.now() - this.promptT) / 1000, `phrase replayed — ${t.midis.length} notes`);
+          this.hit((performance.now() - this.promptT) / 1000, `${t.midis.length}-note phrase replayed`);
         } else {
-          this.verdict.textContent = `${t.ix}/${t.midis.length} — keep going`;
+          this.verdict.textContent = `${t.ix}/${t.midis.length}, keep going`;
         }
       } else {
         const at = t.ix + 1;
         t.ix = 0;
-        this.miss(`note ${at} was ${midiName(midi)} — start over, hear again ↻`);
+        this.miss(`note ${at} was ${midiName(midi)}. Start over, hear again ↻`);
       }
       return;
     }
@@ -858,8 +866,8 @@ export class Quiz {
       if (ok) this.hit(lat, midiName(midi));
       else {
         const octDiff = Math.round((midi - t.midi) / 12);
-        this.miss(octDiff ? `heard ${midiName(midi)} — ${Math.abs(octDiff)} octave${Math.abs(octDiff) > 1 ? 's' : ''} ${octDiff > 0 ? 'high' : 'low'}`
-          : `heard ${midiName(midi)} — read the staff again`);
+        this.miss(octDiff ? `heard ${midiName(midi)}, ${Math.abs(octDiff)} octave${Math.abs(octDiff) > 1 ? 's' : ''} ${octDiff > 0 ? 'high' : 'low'}`
+          : `heard ${midiName(midi)}, read the staff again`);
       }
       return;
     }
@@ -867,7 +875,7 @@ export class Quiz {
       ok = vel >= t.lo && vel <= t.hi;
       const lat = (performance.now() - this.promptT) / 1000;
       if (ok) this.hit(lat, `${t.name} (vel ${vel})`);
-      else this.miss(`velocity ${vel} — ${t.name} is ${t.lo}-${t.hi}`);
+      else this.miss(`velocity ${vel}, ${t.name} is ${t.lo}-${t.hi}`);
       return;
     }
     if (t.kind === 'note') {
@@ -880,7 +888,7 @@ export class Quiz {
     }
     const lat = (performance.now() - this.promptT) / 1000;
     if (ok) this.hit(lat, midiName(midi));
-    else this.miss(`heard ${midiName(midi)} — try again`);
+    else this.miss(`heard ${midiName(midi)}, try again`);
   }
 
   playEar() {
@@ -910,7 +918,7 @@ export class Quiz {
       t.done = true;
       this.hit(lat, this.CEAR_NAMES[t.q]);
     } else {
-      this.miss(`that was ${this.CEAR_NAMES[q]} — listen again`);
+      this.miss(`that was ${this.CEAR_NAMES[q]}, listen again`);
     }
   }
 
@@ -922,7 +930,7 @@ export class Quiz {
       t.done = true;
       this.hit(lat, this.IV_NAMES[t.iv - 1]);
     } else {
-      this.miss(`that was a ${this.IV_NAMES[iv - 1]} — listen again`);
+      this.miss(`that was a ${this.IV_NAMES[iv - 1]}, listen again`);
     }
   }
 
@@ -933,20 +941,20 @@ export class Quiz {
     if (t.kind === 'sus' && this.sus?.active && (str == null || str === this.sus.str)) {
       this.sus.minAmp = Math.min(this.sus.minAmp, v);
       const elapsed = (performance.now() - this.sus.t0) / 1000;
-      if (v < 0.15 && elapsed < t.secs) {
+      if (v < SUS_AMP_FLOOR && elapsed < t.secs) {
         this.sus = null;
-        this.miss(`died at ${elapsed.toFixed(1)}s — let it ring, no palm on the strings`);
+        this.miss(`died at ${elapsed.toFixed(1)}s. Let it ring, no palm on the strings`);
       }
       return;
     }
-    if (t.kind === 'mute' && this.mute?.active && (str == null || str === this.mute.str) && v < 0.1) this.choke();
+    if (t.kind === 'mute' && this.mute?.active && (str == null || str === this.mute.str) && v < MUTE_AMP_FLOOR) this.choke();
   }
 
   choke() {
     const dt = Math.round(performance.now() - this.mute.t0);
     this.mute = null;
     if (dt <= this.target.window) this.hit((performance.now() - this.promptT) / 1000, `choked in ${dt}ms`);
-    else this.miss(`${dt}ms — too slow, mute sooner`);
+    else this.miss(`${dt}ms. Too slow, mute sooner`);
   }
 
   onNoteOff(str, midi) {
@@ -955,7 +963,7 @@ export class Quiz {
     if (t.kind === 'sus' && this.sus?.active && midi === this.sus.midi) {
       const elapsed = (performance.now() - this.sus.t0) / 1000;
       this.sus = null;
-      if (elapsed < t.secs) this.miss(`released at ${elapsed.toFixed(1)}s — hold it`);
+      if (elapsed < t.secs) this.miss(`released at ${elapsed.toFixed(1)}s, hold it`);
       return;
     }
     if (t.kind === 'mute' && this.mute?.active && midi === this.mute.midi) {
@@ -971,7 +979,7 @@ export class Quiz {
       t.done = true;
       this.hit(lat, `held ${(held / 1000).toFixed(1)}s`);
     } else {
-      this.miss(`held ${(held / 1000).toFixed(1)}s — ${err > 0 ? 'over' : 'short'} by ${(Math.abs(err) / 1000).toFixed(1)}s`);
+      this.miss(`held ${(held / 1000).toFixed(1)}s, ${err > 0 ? 'over' : 'short'} by ${(Math.abs(err) / 1000).toFixed(1)}s`);
       this.holdT = 0;
     }
   }
@@ -1196,7 +1204,7 @@ export class RiffDrill {
         const isBest = !best[name] || dt < best[name];
         if (isBest) best[name] = dt;
         this.verdict.textContent =
-          `riff complete — ${this.hits}/${this.hits + this.misses} in ${dt.toFixed(1)}s` +
+          `riff complete, ${this.hits}/${this.hits + this.misses} in ${dt.toFixed(1)}s` +
           ` (best ${best[name].toFixed(1)}s${isBest ? ' *' : ''})`;
         this.app.bump?.('riffs', this.misses === 0, dt);
         this.ix = 0;
@@ -1210,8 +1218,8 @@ export class RiffDrill {
     this.misses++;
     const samePc = ((midi - wantMidi) % 12 + 12) % 12 === 0;
     this.verdict.textContent = samePc
-      ? `right pitch, wrong spot — ${STRING_NAMES[wStr]} fret ${wFret}`
-      : `heard ${midiName(midi)} — expected ${midiName(wantMidi)}`;
+      ? `right pitch, wrong spot, need ${STRING_NAMES[wStr]} fret ${wFret}`
+      : `heard ${midiName(midi)}, expected ${midiName(wantMidi)}`;
     this.verdict.style.color = '#f87171';
     this.stats.textContent = `${this.hits} clean · ${this.misses} off`;
   }

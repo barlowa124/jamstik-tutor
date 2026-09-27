@@ -36,7 +36,7 @@ export class MidiEngine {
 
   async connect(inputId = null) {
     if (!navigator.requestMIDIAccess) {
-      this.h.onStateChange?.('Web MIDI unsupported — use Chrome/Edge');
+      this.h.onStateChange?.('Web MIDI unsupported. Use Chrome/Edge');
       return false;
     }
     try {
