@@ -4,7 +4,7 @@ import { OPEN_MIDI, midiName, inferString, setTuning, setTuningValues, TUNINGS, 
 import { MidiEngine, VirtualJamstik, MidiRecorder, MidiPlayer, parseSmf } from './midi.js';
 import { SynthEngine, RealInput, Metronome, SessionRecorder, PRESETS, PRESET_CATS, VELOCITY_CURVES } from './audio.js';
 import { Fretboard } from './fretboard.js';
-import { drawScope, drawSpectrum, drawWavetable, drawWaterfall, drawStaff, Spectrogram } from './viz.js';
+import { drawScope, drawSpectrum, drawWavetable, drawWaterfall, drawStaff, drawStrings, Spectrogram } from './viz.js';
 import { FreePlay, ChordTrainer, ScaleDrill, Tuner, Quiz, ChordChanges, RiffDrill, RhythmDrill } from './modes.js';
 
 const $ = id => document.getElementById(id);
@@ -21,7 +21,20 @@ const app = {
   mode: null,
   transpose: 0,
   modeName: 'free',
+  // Per-string amplitude lanes for the decay cell: cur is the latest
+  // level, trail is {t, a} history (CC11 values, or 1/0 attack/release
+  // steps on devices that never send expression).
+  exprLanes: Array.from({ length: 6 }, () => ({ cur: 0, trail: [] })),
+  exprCcSeen: false,
 };
+
+function pushExpr(str, a) {
+  const lane = app.exprLanes[str - 1];
+  if (!lane) return;
+  lane.cur = a;
+  lane.trail.push({ t: performance.now(), a });
+  while (lane.trail.length && lane.trail[0].t < performance.now() - 6000) lane.trail.shift();
+}
 
 // ── MIDI handlers ───────────────────────────────────────────────────────
 // key: voice key ('s<n>' per string, 'n<midi>' per note). str is null
@@ -108,6 +121,7 @@ const handlers = {
     app.history.push({ key, str, midi, vel, t0: performance.now(), t1: null, inferred });
     if (app.history.length > 2000) app.history.shift();
     app.midiRec?.add(true, inferred ? null : str, midi, vel, rawMidi);
+    pushExpr(str, 1);
     app.synth.noteOn(key, midi, vel, str);
     app.fretboard.active.set(str, { midi, bend: 0, amp: 1 });
     app.mode?.onNoteOn?.(str, midi, vel);
@@ -131,6 +145,7 @@ const handlers = {
     const open = [...app.history].reverse().find(e => e.key === k && e.t1 === null);
     if (open) open.t1 = performance.now();
     app.midiRec?.add(false, n.inferred ? null : n.str, n.midi, 64, n.rawMidi);
+    pushExpr(n.str, 0);
     app.synth.noteOff(k, n.midi); // stored pitch -> the guard always passes
     app.mode?.onNoteOff?.(n.str ?? str, n.midi);
     app.mode?.onNotesChange?.();
@@ -141,6 +156,7 @@ const handlers = {
     for (const e of app.history) if (e.t1 === null) e.t1 = now;
     app.held.clear();
     app.fretboard.active.clear();
+    for (let s = 1; s <= 6; s++) pushExpr(s, 0);
     app.synth.allOff();
     app.mode?.onNotesChange?.();
     logMidi('all notes off');
@@ -169,7 +185,10 @@ const handlers = {
   // whatever is currently ringing (channel-wide semantics).
   onExpression(str, v) {
     if (!Number.isFinite(v)) return;
+    app.exprCcSeen = true;
+    app.midiRec?.expr(str, v);
     if (str != null) {
+      pushExpr(str, v);
       const n = app.held.get(`s${str}`);
       if (n) n.amp = v;
       const f = app.fretboard.active.get(str);
@@ -177,7 +196,7 @@ const handlers = {
       app.synth.setExpression(`s${str}`, v);
       return;
     }
-    for (const [k, n] of app.held) { n.amp = v; app.synth.setExpression(k, v); }
+    for (const [k, n] of app.held) { n.amp = v; app.synth.setExpression(k, v); pushExpr(n.str, v); }
     for (const f of app.fretboard.active.values()) f.amp = v;
   },
   onStateChange(text) { $('status').textContent = text; },
@@ -509,6 +528,8 @@ function frame() {
   spectro.g.draw(app.synth.analyser);
   drawWaterfall($('waterfall'), app.history, app.held, performance.now());
   drawStaff($('staff'), [...app.held.values()].map(n => n.midi));
+  drawStrings($('strings'), app.exprLanes, app.exprCcSeen, performance.now(),
+    [1, 2, 3, 4, 5, 6].map(s => midiName(OPEN_MIDI[s])));
   // Session tally, refreshed ~once a second.
   if ((frame.n = (frame.n || 0) + 1) % 60 === 0) {
     try {

@@ -247,3 +247,46 @@ export function drawStaff(canvas, midis) {
     g.lineWidth = 1;
   });
 }
+
+// String decay: per-string amplitude lanes. `lanes[i]` = {cur, trail:[{t,a}]}
+// — trail entries are CC11 expression values, or 1/0 attack/release steps
+// when the device never sends expression (ccSeen flag distinguishes).
+export function drawStrings(canvas, lanes, ccSeen, now, names, windowMs = 6000) {
+  const { g, w, h } = prep(canvas);
+  g.clearRect(0, 0, w, h);
+  const STRING_COLORS = { 6: '#f87171', 5: '#fb923c', 4: '#fbbf24', 3: '#34d399', 2: '#60a0ff', 1: '#a78bfa' };
+  const laneH = h / 6, labelW = 30;
+  const xOf = t => labelW + (w - labelW) * (1 - (now - t) / windowMs);
+  for (let s = 6; s >= 1; s--) {
+    const i = s - 1, y = (6 - s) * laneH, lane = lanes[i];
+    const col = STRING_COLORS[s];
+    g.strokeStyle = '#1e293b';
+    g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+    g.fillStyle = '#64748b';
+    g.font = '10px monospace';
+    g.fillText(names?.[i] ?? `s${s}`, 6, y + laneH / 2 + 3);
+    // trail: amplitude history, fading with age
+    if (lane.trail.length) {
+      g.strokeStyle = col;
+      g.lineWidth = 1.5;
+      g.beginPath();
+      let started = false;
+      for (const p of lane.trail) {
+        const x = xOf(p.t), py = y + laneH - 4 - p.a * (laneH - 8);
+        if (x < labelW) continue;
+        if (!started) { g.moveTo(x, py); started = true; } else g.lineTo(x, py);
+      }
+      g.stroke();
+      g.lineWidth = 1;
+    }
+    // current level bar at the right edge
+    const bh = Math.max(0, lane.cur) * (laneH - 8);
+    g.fillStyle = col + 'cc';
+    g.fillRect(w - 6, y + laneH - 4 - bh, 4, bh);
+  }
+  g.strokeStyle = '#1e293b';
+  g.strokeRect(0.5, 0.5, w - 1, h - 1);
+  g.fillStyle = '#64748b';
+  g.font = '9px monospace';
+  g.fillText(ccSeen ? 'CC11 string amplitude' : 'attack/release — no CC11 seen', labelW, h - 3);
+}

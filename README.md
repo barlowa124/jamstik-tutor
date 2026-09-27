@@ -42,9 +42,16 @@ Channel handling is automatic by default (`ch: auto`):
   inferred positions.
 - **CC11 expression**: the Jamstik Studio streams each string's measured
   amplitude (physical decay) as CC11 per channel. The tutor applies it
-  to the sounding synth voice and fades the board dot as the string
-  dies. Palm muting reads as an immediate fade. Single-channel input
-  applies it to all ringing notes, matching channel-wide semantics.
+  to the sounding synth voice, fades the board dot as the string dies,
+  and draws the `string decay` cell: six lanes of amplitude history,
+  per string. Palm muting reads as an immediate fade. Single-channel
+  input applies it to all ringing notes, matching channel-wide
+  semantics, and a note on channel 7 flips the layout assumption to a
+  strict MPE zone (strings on 2-7). Channel aftertouch feeds the same
+  amplitude path. Devices that never send expression still show
+  attack/release steps, labeled honestly in the cell footer.
+- **Expression recording**: CC11 is captured into takes, replays
+  through playback, and exports to `.mid` as channel CC11 events.
 
 Force a mode with the **ch** selector if auto-detection misfires.
 Pitch bend defaults to ±2 semitones. Set ±4/±12/±24 to match your

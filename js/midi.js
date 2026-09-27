@@ -192,6 +192,14 @@ export class MidiRecorder {
     this.events.push({ ms: performance.now() - this.t0, bend: true, str: str ?? null, semis, v });
   }
 
+  // CC11 string-decay events, exported as channel CC11 so the take's
+  // dynamics survive a round-trip into a DAW.
+  expr(str, amp) {
+    if (!this.running) return;
+    this.events.push({ ms: performance.now() - this.t0, expr: true,
+      str: str ?? null, amp: Math.max(0, Math.min(1, amp)) });
+  }
+
   stop() {
     this.t0 = null;
     return buildSmf(this.events);
@@ -216,6 +224,7 @@ export class MidiPlayer {
     events.forEach((e, i) => {
       const t = setTimeout(() => {
         if (e.bend) this.h.onPitchBend?.(e.str, e.semis);
+        else if (e.expr) this.h.onExpression?.(e.str, e.amp);
         else if (e.on) this.h.onNoteOn?.(`p${i}`, e.str, e.raw ?? e.midi, e.vel);
         else this.h.onNoteOff?.(`p${i}`, e.str, e.raw ?? e.midi);
       }, e.ms);
@@ -255,6 +264,7 @@ function buildSmf(events) {
     last = t;
     const ch = e.str == null ? 0 : Math.max(0, Math.min(15, e.str - 1));
     if (e.bend) track.push(0xe0 | ch, e.v & 0x7f, (e.v >> 7) & 0x7f);
+    else if (e.expr) track.push(0xb0 | ch, 11, Math.round(e.amp * 127) & 0x7f);
     else track.push((e.on ? 0x90 : 0x80) | ch, e.midi & 0x7f, e.vel & 0x7f);
   }
   track.push(0x00, 0xff, 0x2f, 0x00);
@@ -307,7 +317,10 @@ export function parseSmf(bytes) {
       } else if (kind === 0xe0) {
         raw.push({ tick, bend: true, ch, v: u8(p) | (u8(p + 1) << 7) });
         p += 2;
-      } else if (kind === 0xa0 || kind === 0xb0) p += 2;
+      } else if (kind === 0xb0) {
+        const cc = u8(p), val = u8(p + 1); p += 2;
+        if (cc === 11) raw.push({ tick, expr: true, ch, amp: val / 127 });
+      } else if (kind === 0xa0) p += 2;
       else if (kind === 0xc0 || kind === 0xd0) p += 1;
       else if (st === 0xff) {
         const meta = u8(p++); const [len, p3] = readVar(p); p = p3;
@@ -336,12 +349,14 @@ export function parseSmf(bytes) {
   // Same convention as live input: only a genuinely multi-channel file
   // gets channel->string mapping. A single-channel file is probably a
   // piano/lead line and goes through the inferred path.
-  const multiCh = new Set(raw.filter(e => !e.bend).map(e => e.ch)).size >= 2;
+  const multiCh = new Set(raw.filter(e => !e.bend && !e.expr).map(e => e.ch)).size >= 2;
   const strOf = ch => multiCh && ch < 6 ? ch + 1 : null;
   const events = raw.map(e => e.bend
     ? { ms: msAt(e.tick), bend: true, str: strOf(e.ch),
         semis: ((e.v - 8192) / 8192) * 2 }
-    : { ms: msAt(e.tick), on: e.on, str: strOf(e.ch), midi: e.midi, vel: e.vel });
+    : e.expr
+      ? { ms: msAt(e.tick), expr: true, str: strOf(e.ch), amp: e.amp }
+      : { ms: msAt(e.tick), on: e.on, str: strOf(e.ch), midi: e.midi, vel: e.vel });
   events.sort((a, b) => a.ms - b.ms);
   return events;
 }
