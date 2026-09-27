@@ -131,6 +131,11 @@ sweep. You can also click frets on the board directly.
   single-channel mode). *Play it back* plays a 4-note pentatonic
   phrase through the synth and you repeat it by ear in order. A wrong
   note names its position and resets the attempt.
+  *Let it ring* asks for a note sustained 2 or 3 seconds, judged on the
+  CC11 amplitude staying above the floor (a palm on the strings ends
+  it). *Choke it* asks for a note killed within 250ms of the attack, by
+  mute or release. Both fall back to note on/off timing when the device
+  sends no expression, and the verdict says so.
   Stats shown: `hits/tries`, streak, average response seconds, a
   running `today` tally, a 7-day total, and a per-day hit-rate bar row.
   Daily drill counts persist

@@ -194,10 +194,11 @@ const handlers = {
       const f = app.fretboard.active.get(str);
       if (f) f.amp = v;
       app.synth.setExpression(`s${str}`, v);
-      return;
+    } else {
+      for (const [k, n] of app.held) { n.amp = v; app.synth.setExpression(k, v); pushExpr(n.str, v); }
+      for (const f of app.fretboard.active.values()) f.amp = v;
     }
-    for (const [k, n] of app.held) { n.amp = v; app.synth.setExpression(k, v); pushExpr(n.str, v); }
-    for (const f of app.fretboard.active.values()) f.amp = v;
+    app.mode?.onExpression?.(str, v);
   },
   onStateChange(text) { $('status').textContent = text; },
   onInputsChanged(inputs) { fillDeviceList(inputs); },

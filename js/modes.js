@@ -476,7 +476,8 @@ export class Quiz {
       ['spot', 'exact positions'], ['bend', 'bend targets'], ['arp', 'arpeggio runs'],
       ['dyn', 'dynamics'], ['hold', 'hold duration'], ['ivb', 'intervals on board'],
       ['read', 'staff reading'], ['all', 'fretboard sweep'], ['dict', 'play it back'],
-      ['ear', 'intervals by ear'], ['cear', 'chords by ear']]) {
+      ['ear', 'intervals by ear'], ['cear', 'chords by ear'],
+      ['sus', 'let it ring'], ['mute', 'choke it']]) {
       this.kindSel.append(el('option', '', label));
       this.kindSel.lastChild.value = v;
     }
@@ -528,13 +529,19 @@ export class Quiz {
     this.ask();
   }
 
-  deactivate() { this.app.fretboard.targets = null; }
+  deactivate() {
+    this.app.fretboard.targets = null;
+    this.sus = null;
+    this.mute = null;
+  }
 
   ask() {
     let kind = this.kindSel.value;
     if (kind === 'mixed') {
-      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'read', 'all', 'dict', 'ear', 'cear'][Math.floor(Math.random() * 12)];
+      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'read', 'all', 'dict', 'ear', 'cear', 'sus', 'mute'][Math.floor(Math.random() * 14)];
     }
+    this.sus = null;
+    this.mute = null;
     this.promptT = performance.now();
     this.app.fretboard.targets = null;
     this.earRow.style.display = kind === 'ear' ? '' : 'none';
@@ -569,6 +576,19 @@ export class Quiz {
       this.holdMidi = null;
       this.holdT = 0;
       this.prompt.textContent = `hold any ${pcName(pc)} for ${name} (${Math.round(this.target.ms)}ms at ${bpm}bpm)`;
+      this.verdict.textContent = '';
+      return;
+    }
+    if (kind === 'sus') {
+      const secs = 2 + Math.floor(Math.random() * 2);
+      this.target = { kind, secs };
+      this.prompt.textContent = `play any note and let it ring for ${secs}s`;
+      this.verdict.textContent = '';
+      return;
+    }
+    if (kind === 'mute') {
+      this.target = { kind, window: 250 };
+      this.prompt.textContent = `play a note and choke it within ${this.target.window}ms`;
       this.verdict.textContent = '';
       return;
     }
@@ -703,7 +723,25 @@ export class Quiz {
 
   frame() {
     const t = this.target;
-    if (!t || t.kind !== 'all' || t.done) return;
+    if (!t || t.done) return;
+    if (t.kind === 'sus') {
+      if (this.sus?.active && performance.now() - this.sus.t0 >= t.secs * 1000) {
+        const minAmp = this.sus.minAmp;
+        this.sus = null;
+        this.hit((performance.now() - this.promptT) / 1000,
+          `rang ${t.secs}s (low ${minAmp.toFixed(2)})` +
+          (this.app.exprCcSeen ? '' : ' · judged by hold only, no CC11'));
+      }
+      return;
+    }
+    if (t.kind === 'mute') {
+      if (this.mute?.active && performance.now() - this.mute.t0 > 1500) {
+        this.mute = null;
+        this.miss('still ringing — choke it');
+      }
+      return;
+    }
+    if (t.kind !== 'all') return;
     const left = t.deadline - performance.now();
     if (left <= 0) {
       t.done = true;
@@ -732,6 +770,22 @@ export class Quiz {
       return;
     }
     if (!t) return;
+    if (t.kind === 'sus') {
+      if (!this.sus?.active) {
+        this.sus = { str, midi, t0: performance.now(), minAmp: 1, active: true };
+        this.verdict.textContent = `ringing… keep it alive for ${t.secs}s`;
+        this.verdict.style.color = '#5eead4';
+      }
+      return;
+    }
+    if (t.kind === 'mute') {
+      if (!this.mute?.active) {
+        this.mute = { str, midi, t0: performance.now(), active: true };
+        this.verdict.textContent = 'now choke it';
+        this.verdict.style.color = '#5eead4';
+      }
+      return;
+    }
     if (t.kind === 'arp') {
       if (t.done) return;
       const shape = CHORD_SHAPES[t.chord];
@@ -872,9 +926,43 @@ export class Quiz {
     }
   }
 
+  onExpression(str, v) {
+    const t = this.target;
+    if (!t || t.done) return;
+    // Global (single-channel) expression applies to whatever is armed.
+    if (t.kind === 'sus' && this.sus?.active && (str == null || str === this.sus.str)) {
+      this.sus.minAmp = Math.min(this.sus.minAmp, v);
+      const elapsed = (performance.now() - this.sus.t0) / 1000;
+      if (v < 0.15 && elapsed < t.secs) {
+        this.sus = null;
+        this.miss(`died at ${elapsed.toFixed(1)}s — let it ring, no palm on the strings`);
+      }
+      return;
+    }
+    if (t.kind === 'mute' && this.mute?.active && (str == null || str === this.mute.str) && v < 0.1) this.choke();
+  }
+
+  choke() {
+    const dt = Math.round(performance.now() - this.mute.t0);
+    this.mute = null;
+    if (dt <= this.target.window) this.hit((performance.now() - this.promptT) / 1000, `choked in ${dt}ms`);
+    else this.miss(`${dt}ms — too slow, mute sooner`);
+  }
+
   onNoteOff(str, midi) {
     const t = this.target;
-    if (!t || t.kind !== 'hold' || this.holdMidi === null || midi !== this.holdMidi) return;
+    if (!t) return;
+    if (t.kind === 'sus' && this.sus?.active && midi === this.sus.midi) {
+      const elapsed = (performance.now() - this.sus.t0) / 1000;
+      this.sus = null;
+      if (elapsed < t.secs) this.miss(`released at ${elapsed.toFixed(1)}s — hold it`);
+      return;
+    }
+    if (t.kind === 'mute' && this.mute?.active && midi === this.mute.midi) {
+      this.choke();
+      return;
+    }
+    if (t.kind !== 'hold' || this.holdMidi === null || midi !== this.holdMidi) return;
     const held = performance.now() - this.holdT;
     this.holdMidi = null;
     const err = held - t.ms;
