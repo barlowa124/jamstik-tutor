@@ -6,7 +6,7 @@ import {
   midiName, OPEN_MIDI, pcName, SCALES, scalePositions, scaleRun, STRING_NAMES,
 } from './theory.js';
 import { Metronome } from './audio.js';
-import { drawStaff } from './viz.js';
+import { drawStaff, bestF0 } from './viz.js';
 
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -410,7 +410,8 @@ export class Tuner {
     this.app.fretboard.targets = null;
     this.app.fretboard.scaleOverlay = null;
     panel.append(el('div', 'hint',
-      'Play a string. The needle shows live pitch bend in cents (±100).'));
+      'Play a string. With the Jamstik the needle tracks pitch bend;' +
+      ' with audio-in enabled it tunes whatever the mic hears (±50c).'));
     this.noteEl = el('div', 'big-readout', '—');
     this.cv = el('canvas', 'tuner-cv');
     this.detail = el('div', 'stats', '');
@@ -442,21 +443,39 @@ export class Tuner {
 
     const held = [...this.app.held.values()];
     const entry = held.find(n => n.str === this.lastStr) || held[held.length - 1];
-    if (!entry) { this.noteEl.textContent = '—'; this.detail.textContent = ''; return; }
 
-    const cents = (entry.bend || 0) * 100;
+    // Resolve the reading: MIDI bend for held Jamstik notes, else the
+    // measured audio pitch when real input is enabled — a true chromatic
+    // tuner for any guitar the mic can hear.
+    let cents = null, label = '—', detail = '';
+    if (entry) {
+      cents = (entry.bend || 0) * 100;
+      label = midiName(entry.midi);
+      detail = `${STRING_NAMES[entry.str]} string · ${entry.midi - OPEN_MIDI[entry.str]} fret` +
+        ` · ${cents >= 0 ? '+' : ''}${cents.toFixed(0)} cents` +
+        (entry.inferred ? ' · position inferred' : '');
+    } else if (this.app.real?.analyser) {
+      const sr = this.app.synth.ctx?.sampleRate || 44100;
+      const p = bestF0({ analyser: this.app.real.analyser }, sr);
+      if (p.f > 0 && p.db > -90) {
+        const midi = 69 + 12 * Math.log2(p.f / 440);
+        const near = Math.round(midi);
+        cents = (midi - near) * 100;
+        label = midiName(near);
+        detail = `${p.f.toFixed(1)}Hz via audio in · ${p.est}`;
+      }
+    }
+    if (cents === null) { this.noteEl.textContent = '—'; this.detail.textContent = ''; return; }
+
     const clamped = Math.max(-50, Math.min(50, cents));
     const x = w / 2 + (clamped / 50) * (w / 2 - 14);
     const inTune = Math.abs(cents) < 6;
     g.strokeStyle = inTune ? '#34d399' : '#fbbf24';
     g.lineWidth = 3;
     g.beginPath(); g.moveTo(x, h - 34); g.lineTo(x, 4); g.stroke();
-    this.noteEl.textContent = midiName(entry.midi);
+    this.noteEl.textContent = label;
     this.noteEl.style.color = inTune ? '#34d399' : '#cbd5e1';
-    this.detail.textContent =
-      `${STRING_NAMES[entry.str]} string · ${entry.midi - OPEN_MIDI[entry.str]} fret` +
-      ` · ${cents >= 0 ? '+' : ''}${cents.toFixed(0)} cents` +
-      (entry.inferred ? ' · position inferred' : '');
+    this.detail.textContent = detail;
   }
 }
 

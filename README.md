@@ -231,12 +231,20 @@ down error). When the two disagree by a semitone the ACF wins, which
 catches the spectrum locking onto a loud harmonic. Harmonics samples
 the spectrum at f0*1 through f0*10 relative to the fundamental, a
 timbre fingerprint that separates a plucked string's falling comb
-from whatever a wavetable preset baked in. Envelope scrolls the RMS
-level per source with onset ticks found by spectral flux, so pick
-attacks read off the audio itself. The meters row also reports the
-ACF estimate with its confidence, zero-crossing rate, and spectral
-flatness (tonal comb vs noise). The spectrogram runs the same
+from whatever a wavetable preset baked in, plus an inharmonicity B
+coefficient fitted from measured partial frequencies. Envelope
+scrolls the RMS level per source with onset ticks found by spectral
+flux, so pick attacks read off the audio itself; the newest onset
+gets its attack time in ms, and a run of 4+ onsets yields a tempo
+estimate. The meters row also reports the ACF estimate with its
+confidence, zero-crossing rate, spectral flatness (tonal comb vs
+noise), and crest factor. The spectrogram runs the same
 log-frequency axis with note gridlines.
+
+Tuner mode reads MIDI pitch bend for held Jamstik notes. With audio
+input enabled and nothing held, the same needle becomes a chromatic
+tuner for whatever the mic hears, driven by the combined FFT+ACF
+pitch estimate.
 
 The waterfall scrolls per-string lanes left over the last
 12 seconds, each note a colored bar from attack to release, taller when

@@ -131,7 +131,7 @@ const ACF_CONF = 0.45; // below this the ACF estimate is noise
 // Best f0 for display: ACF wins when it is confident and disagrees with
 // the spectral peak by more than a semitone (harmonic lock), else the
 // higher-resolution spectral estimate stays.
-function bestF0(src, sr) {
+export function bestF0(src, sr) {
   const sp = domPeak(src.analyser, sr);
   const ac = acfPitch(src.analyser, sr);
   if (ac.conf > ACF_CONF && ac.f > 0) {
@@ -304,8 +304,13 @@ export function drawMeters(canvas, sources, sr = 44100) {
     const cents = midi === null ? '' : ` ${(Math.round((midi - Math.round(midi)) * 100) >= 0 ? '+' : '')}${Math.round((midi - Math.round(midi)) * 100)}c`;
 
     // zero-crossing rate: fraction of samples that cross zero
-    let zc = 0;
-    for (let i = 1; i < tb.length; i++) if ((tb[i - 1] < 0) !== (tb[i] < 0)) zc++;
+    let zc = 0, peak = 0;
+    for (let i = 1; i < tb.length; i++) {
+      if ((tb[i - 1] < 0) !== (tb[i] < 0)) zc++;
+      const a = Math.abs(tb[i]);
+      if (a > peak) peak = a;
+    }
+    const crest = peak / (Math.sqrt(sum / tb.length) || 1e-9);
     const ac = acfPitch(src.analyser, sr);
 
     const lvl = Math.max(0, Math.min(1, (db + 60) / 55));
@@ -325,7 +330,8 @@ export function drawMeters(canvas, sources, sr = 44100) {
       g.fillStyle = '#94a3b8';
       g.fillText(
         `acf ${ac.f > 0 ? ac.f.toFixed(1) + 'Hz' : '--'} ${ac.conf.toFixed(2)}` +
-        ` · zcr ${(zc / tb.length * 100).toFixed(1)}% · flat ${flat.toFixed(2)}`,
+        ` · zcr ${(zc / tb.length * 100).toFixed(1)}% · flat ${flat.toFixed(2)}` +
+        ` · crest ${crest.toFixed(1)}`,
         58, y + 46);
     }
   });
@@ -494,7 +500,7 @@ export function drawEnvelope(canvas, sources, sr = 44100) {
       for (let i = lo; i < hi; i++) { const d = b[i] - st.prev[i]; if (d > 0) f += d; }
       f /= (hi - lo);
       const last = st.onsets[st.onsets.length - 1];
-      if (st.ema && f > st.ema * ONSET_RATIO && f > ONSET_MIN_DB &&
+      if (st.ema && f > st.ema * ONSET_RATIO && f > ONSET_MIN_DB && db > -55 &&
           (last === undefined || now - last > ONSET_GAP_MS)) st.onsets.push(now);
       st.ema = st.ema * 0.9 + f * 0.1;
     }
@@ -522,6 +528,31 @@ export function drawEnvelope(canvas, sources, sr = 44100) {
     g.fillStyle = src.color;
     g.font = '9px ui-monospace, monospace';
     g.fillText(`${src.label} ${db.toFixed(1)}dB`, 8, y0 + 13);
+
+    // attack time of the newest onset: ms from onset to envelope peak
+    const newest = st.onsets[st.onsets.length - 1];
+    if (newest !== undefined && now - newest < 2000) {
+      let pk = -Infinity, tpk = newest;
+      for (const pt of st.hist) {
+        if (pt.t >= newest && pt.t < newest + 400 && pt.db > pk) { pk = pt.db; tpk = pt.t; }
+      }
+      const x = w - (now - newest) / ENV_WINDOW_MS * w;
+      g.fillStyle = '#94a3b8';
+      g.fillText(`+${Math.round(tpk - newest)}ms`, Math.min(x, w - 34), y0 + 26);
+    }
+
+    // tempo estimate from median inter-onset interval
+    if (st.onsets.length >= 4 && si === sources.length - 1) {
+      const iv = [];
+      for (let i = 1; i < st.onsets.length; i++) iv.push(st.onsets[i] - st.onsets[i - 1]);
+      iv.sort((a, b) => a - b);
+      const med = iv[iv.length >> 1];
+      if (med > 200 && med < 1500) {
+        const t2 = `~${Math.round(60000 / med)} bpm`;
+        g.fillStyle = src.color;
+        g.fillText(t2, w - g.measureText(t2).width - 6, y0 + 13);
+      }
+    }
   }
 }
 
@@ -547,20 +578,37 @@ export function drawHarmonics(canvas, sources, sr = 44100) {
     return;
   }
   const b = freqBuf(best.src.analyser), hz = sr / best.src.analyser.fftSize;
-  const amps = [];
+  const amps = [], meas = [];
   for (let k = 1; k <= HARMONIC_COUNT; k++) {
-    const bi = Math.round(best.f * k / hz);
+    const fc = best.f * k;
+    const bi = Math.round(fc / hz);
     if (bi >= b.length) break;
-    let v = -140;
-    for (let i = Math.max(0, bi - 1); i <= Math.min(b.length - 1, bi + 1); i++) v = Math.max(v, b[i]);
+    // real strings ring sharp of the ideal harmonic; search +-2.5%
+    const wbin = Math.max(1, Math.round(0.025 * fc / hz));
+    let v = -140, bix = bi;
+    for (let i = Math.max(0, bi - wbin); i <= Math.min(b.length - 1, bi + wbin); i++) {
+      if (b[i] > v) { v = b[i]; bix = i; }
+    }
+    const l = b[bix - 1] ?? -140, r = b[bix + 1] ?? -140;
+    const sh = Math.max(-0.5, Math.min(0.5, 0.5 * (l - r) / ((l - 2 * v + r) || 1e-9)));
+    meas.push({ k, f: (bix + sh) * hz, a: Math.pow(10, v / 20) });
     amps.push(Math.pow(10, v / 20));
   }
+  // inharmonicity: f_k = k f0 sqrt(1 + B k^2), fit B amplitude-weighted
+  let bsum = 0, wsum = 0;
+  for (const m of meas) {
+    if (m.k < 2) continue;
+    const r = m.f / (m.k * best.f);
+    bsum += ((r * r - 1) / (m.k * m.k)) * m.a;
+    wsum += m.a;
+  }
+  const B = wsum > 0 ? bsum / wsum : 0;
   const ref = amps[0] || 1;
   const bw = (w - 20) / amps.length;
   const midi = 69 + 12 * Math.log2(best.f / 440);
   g.fillStyle = best.src.color;
   g.font = '9px ui-monospace, monospace';
-  g.fillText(`${best.src.label} f0 ${midiName(Math.round(midi))} ${best.f.toFixed(1)}Hz`, 10, 12);
+  g.fillText(`${best.src.label} f0 ${midiName(Math.round(midi))} ${best.f.toFixed(1)}Hz · B ${(B * 1e4).toFixed(2)}e-4`, 10, 12);
   amps.forEach((a, i) => {
     const v = a / ref;
     g.fillStyle = best.src.color + 'bb';
