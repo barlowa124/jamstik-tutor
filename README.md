@@ -202,9 +202,27 @@ proprietary sysex/BLE channel and are intentionally not reimplemented.
 
 ## Visualizations
 
-Waveform (time domain), spectrum (log-spaced FFT bars), scrolling
-spectrogram, the wavetable frames the synth uses, a note waterfall, and
-a staff view. The waterfall scrolls per-string lanes left over the last
+Waveform (time domain), spectrum, scrolling spectrogram, the wavetable
+frames the synth uses, a pitch-class chromagram, a level-and-tone
+readout, a note waterfall, and a staff view.
+
+The spectrum runs a true log-frequency axis across the guitar band
+(60Hz to 4kHz) with a semitone grid, octave labels, and the six open
+string frequencies marked along the top. While notes are held, each
+string draws faint harmonic markers at 2x-6x its fundamental in its own
+color, so you can watch a note's overtone stack land on real peaks. A
+decaying peak-hold trace rides the bars, and the top right names the
+dominant peak as nearest note plus frequency and cents off (the FFT is
+8192 bins deep and peak frequency is refined by parabolic
+interpolation, so cents mean something down on the low E).
+
+The chromagram folds all FFT energy into the 12 pitch classes, one bar
+each, so chord quality reads directly out of the audio. Level and tone
+gives each source an RMS bar plus numbers: level in dB, spectral
+centroid (brightness) in Hz, and the same dominant-peak note/cents
+readout as the spectrum.
+
+The waterfall scrolls per-string lanes left over the last
 12 seconds, each note a colored bar from attack to release, taller when
 hit harder. The staff notates held notes on treble clef with
 accidentals and ledger lines, so what you play shows up as standard
@@ -220,7 +238,8 @@ js/midi.js          Web MIDI engine, channel->string map, VirtualJamstik
 js/audio.js         preset wavetable synth, FX chain, real-input capture,
                     recorder, metronome
 js/fretboard.js     canvas board: notes, bends, targets, scale overlay
-js/viz.js           scope / spectrum / spectrogram / wavetable / waterfall
+js/viz.js           scope / spectrum / spectrogram / chromagram / meters /
+                    wavetable / waterfall / staff / string decay
 js/modes.js         free play, chord trainer, scale drills, tuner, quiz
 ```
 

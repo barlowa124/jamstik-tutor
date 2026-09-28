@@ -39,24 +39,217 @@ export function drawScope(canvas, sources) {
   }
 }
 
-// Frequency bars, log-ish spacing via linear bin subsample.
-export function drawSpectrum(canvas, sources) {
+// Analysis helpers: reused FFT buffers, log-frequency mapping, and a
+// parabolic-interpolated dominant-peak estimator. Display band is the
+// guitar range, roughly E2 fundamentals to ~4kHz harmonics.
+const FMIN = 60, FMAX = 4000;
+const _fb = new Map(), _tb = new Map();
+
+function freqBuf(an) {
+  let b = _fb.get(an);
+  if (!b || b.length !== an.frequencyBinCount) {
+    b = new Float32Array(an.frequencyBinCount);
+    _fb.set(an, b);
+  }
+  an.getFloatFrequencyData(b);
+  return b;
+}
+
+function timeBuf(an) {
+  let b = _tb.get(an);
+  if (!b || b.length !== an.fftSize) {
+    b = new Float32Array(an.fftSize);
+    _tb.set(an, b);
+  }
+  an.getFloatTimeDomainData(b);
+  return b;
+}
+
+// Dominant spectral peak in the display band, refined by parabolic
+// interpolation between bins so cents are meaningful at low pitch.
+function domPeak(an, sr) {
+  const b = freqBuf(an), hz = sr / an.fftSize;
+  const lo = Math.max(1, Math.floor(FMIN / hz));
+  const hiB = Math.min(b.length - 2, Math.ceil(FMAX / hz));
+  let bi = lo, bv = b[lo];
+  for (let i = lo + 1; i <= hiB; i++) if (b[i] > bv) { bv = b[i]; bi = i; }
+  const l = b[bi - 1], c = b[bi], r = b[bi + 1];
+  const shift = Math.max(-0.5, Math.min(0.5, 0.5 * (l - r) / ((l - 2 * c + r) || 1e-9)));
+  const f = (bi + shift) * hz;
+  return { f, db: c };
+}
+
+const OPEN_STRING_HZ = { E2: 82.41, A2: 110, D3: 146.83, G3: 196, B3: 246.94, E4: 329.63 };
+const STRING_COLORS = { 6: '#f87171', 5: '#fb923c', 4: '#fbbf24', 3: '#34d399', 2: '#60a0ff', 1: '#a78bfa' };
+const f2x = (f, w) => w * Math.log2(f / FMIN) / Math.log2(FMAX / FMIN);
+const _peaks = new Map(); // canvas -> [{arr} per source]
+
+// Log-frequency spectrum with a semitone grid, open-string labels,
+// per-string harmonic markers for held notes, peak-hold, and a
+// dominant-peak note readout.
+export function drawSpectrum(canvas, sources, held, sr = 44100) {
   const { g, w, h } = prep(canvas);
   g.clearRect(0, 0, w, h);
-  const buf = new Uint8Array(1024);
-  const bars = 96;
-  for (const src of sources) {
-    if (!src.analyser) continue;
-    src.analyser.getByteFrequencyData(buf);
-    for (let b = 0; b < bars; b++) {
-      // map bar -> bin with a log curve so low frequencies get room
-      const bin = Math.floor(Math.pow(buf.length, b / bars));
-      const v = buf[Math.min(bin, buf.length - 1)] / 255;
-      g.fillStyle = src.color + 'aa';
-      const bw = w / bars;
-      g.fillRect(b * bw, h - v * h, bw - 1, v * h);
+  const top = 14, gh = h - top - 14;
+
+  // semitone gridlines; octave Cs get a label, open strings get names
+  for (let m = 0; m < 128; m++) {
+    const f = 440 * Math.pow(2, (m - 69) / 12);
+    if (f < FMIN || f > FMAX) continue;
+    const x = f2x(f, w);
+    const isC = ((m % 12) + 12) % 12 === 0;
+    g.strokeStyle = isC ? '#334155' : '#1a2436';
+    g.beginPath(); g.moveTo(x, top); g.lineTo(x, top + gh); g.stroke();
+    if (isC) {
+      g.fillStyle = '#475569';
+      g.font = '8px ui-monospace, monospace';
+      g.fillText(midiName(m), x + 1, h - 4);
     }
   }
+  g.fillStyle = '#64748b';
+  g.font = '8px ui-monospace, monospace';
+  for (const [n, f] of Object.entries(OPEN_STRING_HZ)) {
+    g.fillText(n, f2x(f, w) - 8, top - 3);
+  }
+
+  // harmonic markers for held notes: f0..6f0 in each note's string color
+  if (held) {
+    for (const n of held.values()) {
+      const f0 = 440 * Math.pow(2, (n.midi + (n.bend || 0) - 69) / 12);
+      for (let k = 1; k <= 6; k++) {
+        const f = f0 * k;
+        if (f > FMAX) break;
+        const x = f2x(f, w);
+        g.strokeStyle = (STRING_COLORS[n.str] || '#94a3b8') + (k === 1 ? 'cc' : '55');
+        g.beginPath(); g.moveTo(x, top); g.lineTo(x, top + gh); g.stroke();
+      }
+    }
+  }
+
+  let pkState = _peaks.get(canvas);
+  if (!pkState) { pkState = []; _peaks.set(canvas, pkState); }
+
+  sources.forEach((src, si) => {
+    if (!src.analyser) return;
+    const b = freqBuf(src.analyser), hz = sr / src.analyser.fftSize;
+    let peaks = pkState[si];
+    if (!peaks || peaks.length !== w) { peaks = new Float32Array(w); pkState[si] = peaks; }
+    const hzh = h - 14;
+    for (let x = 0; x < w; x += 2) {
+      const f = FMIN * Math.pow(FMAX / FMIN, x / w);
+      const bi = f / hz, b0 = Math.floor(bi), frac = bi - b0;
+      const db = (b[b0] || -140) * (1 - frac) + (b[b0 + 1] ?? -140) * frac;
+      const v = Math.max(0, Math.min(1, (db + 100) / 70));
+      g.fillStyle = src.color + 'aa';
+      g.fillRect(x, top + gh - v * gh, 2, v * gh);
+      for (let px = x; px < Math.min(x + 2, w); px++) {
+        peaks[px] = Math.max(v, peaks[px] - 0.004);
+      }
+    }
+    g.strokeStyle = src.color;
+    g.lineWidth = 1;
+    g.beginPath();
+    for (let x = 0; x < w; x++) {
+      const y = top + gh - peaks[x] * gh;
+      x === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+    }
+    g.stroke();
+    g.fillStyle = src.color;
+    g.font = '9px ui-monospace, monospace';
+    g.fillText(src.label, 8 + si * 60, h - 4);
+  });
+
+  // dominant peak readout: nearest note + cents off, loudest source wins
+  let best = null;
+  for (const src of sources) {
+    if (!src.analyser) continue;
+    const p = domPeak(src.analyser, sr);
+    if (!best || p.db > best.db) best = { ...p, color: src.color };
+  }
+  if (best && best.db > -90) {
+    const midi = 69 + 12 * Math.log2(best.f / 440);
+    const cents = Math.round((midi - Math.round(midi)) * 100);
+    g.fillStyle = best.color;
+    g.font = 'bold 10px ui-monospace, monospace';
+    const txt = `${midiName(Math.round(midi))} ${best.f.toFixed(1)}Hz ${cents >= 0 ? '+' : ''}${cents}c`;
+    g.fillText(txt, w - g.measureText(txt).width - 6, top - 3);
+  }
+}
+
+// Chromagram: FFT energy folded into 12 pitch-class bars. Two source
+// halves side by side (synth left, input right). Held pitch classes get
+// a bright tick above their bar.
+export function drawChroma(canvas, sources, sr = 44100) {
+  const { g, w, h } = prep(canvas);
+  g.clearRect(0, 0, w, h);
+  const PC = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const half = w / sources.length;
+  sources.forEach((src, si) => {
+    if (!src.analyser) return;
+    const b = freqBuf(src.analyser), hz = sr / src.analyser.fftSize;
+    const energy = new Float32Array(12);
+    for (let m = 24; m <= 96; m++) {
+      const f = 440 * Math.pow(2, (m - 69) / 12);
+      if (f > FMAX * 1.5) break;
+      const bi = Math.round(f / hz);
+      const amp = Math.pow(10, (b[bi] ?? -140) / 20); // dB -> linear
+      energy[((m % 12) + 12) % 12] += amp;
+    }
+    const max = Math.max(...energy, 1e-6);
+    const bw = (half - 10) / 12, x0 = si * half + 5;
+    g.fillStyle = src.color;
+    g.font = '9px ui-monospace, monospace';
+    g.fillText(src.label, x0, 12);
+    energy.forEach((e, pc) => {
+      const v = Math.sqrt(e / max); // sqrt so quiet PCs stay visible
+      const bh = v * (h - 30);
+      g.fillStyle = src.color + 'bb';
+      g.fillRect(x0 + pc * bw, h - 16 - bh, bw - 2, bh);
+      g.fillStyle = '#64748b';
+      g.fillText(PC[pc], x0 + pc * bw + bw / 2 - 4, h - 4);
+    });
+  });
+}
+
+// Level + tone readout per source: RMS level bar and text readouts for
+// RMS dB, spectral centroid (brightness), and the dominant peak's
+// nearest note with cents deviation.
+export function drawMeters(canvas, sources, sr = 44100) {
+  const { g, w, h } = prep(canvas);
+  g.clearRect(0, 0, w, h);
+  const rowH = h / sources.length;
+  sources.forEach((src, si) => {
+    if (!src.analyser) return;
+    const y = si * rowH;
+    const tb = timeBuf(src.analyser);
+    let sum = 0;
+    for (let i = 0; i < tb.length; i++) sum += tb[i] * tb[i];
+    const db = 20 * Math.log10(Math.sqrt(sum / tb.length) || 1e-9);
+    const b = freqBuf(src.analyser), hz = sr / src.analyser.fftSize;
+    let num = 0, den = 0;
+    for (let i = Math.floor(FMIN / hz); i < Math.min(b.length, Math.ceil(FMAX / hz)); i++) {
+      const a = Math.pow(10, b[i] / 20);
+      num += i * hz * a; den += a;
+    }
+    const cent = den > 0 ? num / den : 0;
+    const p = domPeak(src.analyser, sr);
+    const midi = p.db > -90 ? 69 + 12 * Math.log2(p.f / 440) : null;
+    const cents = midi === null ? '' : ` ${(Math.round((midi - Math.round(midi)) * 100) >= 0 ? '+' : '')}${Math.round((midi - Math.round(midi)) * 100)}c`;
+
+    const lvl = Math.max(0, Math.min(1, (db + 60) / 55));
+    g.fillStyle = '#1e293b';
+    g.fillRect(8, y + 6, w - 16, 10);
+    g.fillStyle = lvl > 0.85 ? '#f87171' : src.color;
+    g.fillRect(8, y + 6, (w - 16) * lvl, 10);
+    g.fillStyle = src.color;
+    g.font = '9px ui-monospace, monospace';
+    g.fillText(src.label, 10, y + 32);
+    g.fillStyle = '#cbd5e1';
+    g.fillText(
+      `${db.toFixed(1)}dB · bright ${cent.toFixed(0)}Hz` +
+      (midi === null ? ' · silence' : ` · peak ${midiName(Math.round(midi))} ${p.f.toFixed(1)}Hz${cents}`),
+      58, y + 32);
+  });
 }
 
 // Scrolling spectrogram: each frame shifts left, new column drawn at right.

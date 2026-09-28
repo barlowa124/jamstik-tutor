@@ -129,7 +129,7 @@ export class SynthEngine {
       this.reverb.buffer = this.makeImpulse(1.9, 2.8);
       this.verbWet = this.ctx.createGain();
       this.analyser = this.ctx.createAnalyser();
-      this.analyser.fftSize = 2048;
+      this.analyser.fftSize = 8192;
       this.analyser.smoothingTimeConstant = 0.7;
       this.recTap = this.ctx.createMediaStreamDestination();
 
@@ -256,7 +256,7 @@ export class RealInput {
     });
     const src = ctx.createMediaStreamSource(this.stream);
     this.analyser = ctx.createAnalyser();
-    this.analyser.fftSize = 2048;
+    this.analyser.fftSize = 8192;
     this.analyser.smoothingTimeConstant = 0.7;
     src.connect(this.analyser);
     return true;
