@@ -98,7 +98,7 @@ sweep. You can also click frets on the board directly.
   to joy, amazing grace, scarborough fair, drunken sailor, sakura
   sakura, greensleeves, house of the rising sun. `hear it` auditions at
   the header BPM in eighth-note steps. Completions report elapsed time
-  against a per-song session best.
+  against a per-song best, and best times persist in `localStorage`.
   The board lights the current position. Wrong notes coach the expected
   pitch and string but never reset your place. `hear it` auditions the
   pattern. In single-channel mode steps match by pitch.
@@ -141,6 +141,9 @@ sweep. You can also click frets on the board directly.
   no bend data the verdict says the device isn't sending it.
   *Tremolo picking* asks for one note attacked 8 times inside 4 seconds
   and reports the picking rate and the worst gap between attacks.
+  *Progression by ear* plays a 3-chord diatonic loop through the synth
+  and you replay it chord by chord, judged on held chord tones. A wrong
+  answer names what you played and the chord it wanted.
   Stats shown: `hits/tries`, streak, average response seconds, a
   running `today` tally, a 7-day total, and a per-day hit-rate bar row.
   Daily drill counts persist
