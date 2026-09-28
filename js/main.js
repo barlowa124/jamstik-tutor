@@ -4,7 +4,7 @@ import { OPEN_MIDI, midiName, inferString, setTuning, setTuningValues, TUNINGS, 
 import { MidiEngine, VirtualJamstik, MidiRecorder, MidiPlayer, parseSmf } from './midi.js';
 import { SynthEngine, RealInput, Metronome, SessionRecorder, PRESETS, PRESET_CATS, VELOCITY_CURVES } from './audio.js';
 import { Fretboard } from './fretboard.js';
-import { drawScope, drawSpectrum, drawChroma, drawMeters, drawPitchTrack, drawHarmonics, drawWavetable, drawWaterfall, drawStaff, drawStrings, Spectrogram } from './viz.js';
+import { drawScope, drawSpectrum, drawChroma, drawMeters, drawPitchTrack, drawHarmonics, drawEnvelope, drawWavetable, drawWaterfall, drawStaff, drawStrings, Spectrogram } from './viz.js';
 import { FreePlay, ChordTrainer, ScaleDrill, Tuner, Quiz, ChordChanges, RiffDrill, RhythmDrill } from './modes.js';
 
 const $ = id => document.getElementById(id);
@@ -536,6 +536,7 @@ function frame() {
   drawMeters($('meters'), srcs, sr);
   drawPitchTrack($('pitchtrack'), srcs, sr);
   drawHarmonics($('harmonics'), srcs, sr);
+  drawEnvelope($('envelope'), srcs, sr);
   spectro.g.draw(app.synth.analyser, sr);
   drawWaterfall($('waterfall'), app.history, app.held, performance.now());
   drawStaff($('staff'), [...app.held.values()].map(n => n.midi));

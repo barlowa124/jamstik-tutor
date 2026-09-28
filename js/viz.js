@@ -79,6 +79,68 @@ function domPeak(an, sr) {
   return { f, db: c };
 }
 
+// Autocorrelation f0: normalized ACF over a 4x-downsampled time buffer.
+// Catches the spectral peak's failure mode (locking onto a loud
+// harmonic instead of the fundamental) — a periodic signal correlates
+// at its true period no matter which partial is loudest.
+const ACF_DS = 4;
+const ACF_MIN_HZ = 60, ACF_MAX_HZ = 1400;
+const _ds = new Float32Array(4096);
+
+function acfPitch(an, sr) {
+  const t = timeBuf(an);
+  const n = Math.min(_ds.length, t.length / ACF_DS) | 0;
+  const sre = sr / ACF_DS;
+  let e = 0;
+  for (let i = 0; i < n; i++) {
+    const k = i * ACF_DS;
+    const v = (t[k] + t[k + 1] + t[k + 2] + t[k + 3]) / ACF_DS;
+    _ds[i] = v; e += v * v;
+  }
+  const r0 = e / n;
+  if (r0 < 1e-8) return { f: 0, conf: 0 };
+  const lagLo = Math.max(2, Math.floor(sre / ACF_MAX_HZ));
+  const lagHi = Math.min(n >> 1, Math.floor(sre / ACF_MIN_HZ));
+  const vals = new Float32Array(lagHi + 1);
+  let bv = -1;
+  for (let lag = lagLo; lag <= lagHi; lag++) {
+    let s = 0;
+    const m = n - lag;
+    for (let i = 0; i < m; i++) s += _ds[i] * _ds[i + lag];
+    const v = s / m / r0;
+    vals[lag] = v;
+    if (v > bv) bv = v;
+  }
+  // A periodic signal also correlates at 2x, 3x... its period, so the
+  // global argmax tends to land an octave down. Take the smallest lag
+  // that nearly matches the max instead.
+  let bl = 0;
+  for (let lag = lagLo; lag <= lagHi; lag++) {
+    if (vals[lag] > Math.max(0.5, 0.85 * bv)) { bl = lag; break; }
+  }
+  if (bl <= 0) return { f: 0, conf: 0 };
+  // parabolic refinement on the correlation peak
+  const ac = l => { let s = 0; const m = n - l; for (let i = 0; i < m; i++) s += _ds[i] * _ds[i + l]; return s / m / r0; };
+  const l = ac(bl - 1), c = vals[bl], r = ac(bl + 1);
+  const shift = Math.max(-0.5, Math.min(0.5, 0.5 * (l - r) / ((l - 2 * c + r) || 1e-9)));
+  return { f: sre / (bl + shift), conf: vals[bl] };
+}
+
+const ACF_CONF = 0.45; // below this the ACF estimate is noise
+
+// Best f0 for display: ACF wins when it is confident and disagrees with
+// the spectral peak by more than a semitone (harmonic lock), else the
+// higher-resolution spectral estimate stays.
+function bestF0(src, sr) {
+  const sp = domPeak(src.analyser, sr);
+  const ac = acfPitch(src.analyser, sr);
+  if (ac.conf > ACF_CONF && ac.f > 0) {
+    const dm = Math.abs(12 * Math.log2(ac.f / (sp.f || 1)));
+    if (dm > 1 || sp.db < -80) return { f: ac.f, db: sp.db, est: 'acf', acf: ac };
+  }
+  return { f: sp.f, db: sp.db, est: 'fft', acf: ac };
+}
+
 const OPEN_STRING_HZ = { E2: 82.41, A2: 110, D3: 146.83, G3: 196, B3: 246.94, E4: 329.63 };
 const STRING_COLORS = { 6: '#f87171', 5: '#fb923c', 4: '#fbbf24', 3: '#34d399', 2: '#60a0ff', 1: '#a78bfa' };
 const f2x = (f, w) => w * Math.log2(f / FMIN) / Math.log2(FMAX / FMIN);
@@ -226,15 +288,25 @@ export function drawMeters(canvas, sources, sr = 44100) {
     for (let i = 0; i < tb.length; i++) sum += tb[i] * tb[i];
     const db = 20 * Math.log10(Math.sqrt(sum / tb.length) || 1e-9);
     const b = freqBuf(src.analyser), hz = sr / src.analyser.fftSize;
-    let num = 0, den = 0;
+    // one pass over the display band: centroid (num/den) and spectral
+    // flatness (geometric vs arithmetic mean). Flatness near 0 is a
+    // comb-like tonal spectrum, near 1 is noise.
+    let num = 0, den = 0, lg = 0, cnt = 0;
     for (let i = Math.floor(FMIN / hz); i < Math.min(b.length, Math.ceil(FMAX / hz)); i++) {
       const a = Math.pow(10, b[i] / 20);
       num += i * hz * a; den += a;
+      lg += Math.log(a + 1e-12); cnt++;
     }
     const cent = den > 0 && db > -55 ? `${(num / den).toFixed(0)}Hz` : '--';
+    const flat = cnt ? Math.exp(lg / cnt) / (den / cnt + 1e-12) : 0;
     const p = domPeak(src.analyser, sr);
     const midi = p.db > -90 && db > -55 ? 69 + 12 * Math.log2(p.f / 440) : null;
     const cents = midi === null ? '' : ` ${(Math.round((midi - Math.round(midi)) * 100) >= 0 ? '+' : '')}${Math.round((midi - Math.round(midi)) * 100)}c`;
+
+    // zero-crossing rate: fraction of samples that cross zero
+    let zc = 0;
+    for (let i = 1; i < tb.length; i++) if ((tb[i - 1] < 0) !== (tb[i] < 0)) zc++;
+    const ac = acfPitch(src.analyser, sr);
 
     const lvl = Math.max(0, Math.min(1, (db + 60) / 55));
     g.fillStyle = '#1e293b';
@@ -249,6 +321,13 @@ export function drawMeters(canvas, sources, sr = 44100) {
       `${db.toFixed(1)}dB · bright ${cent}` +
       (midi === null ? ' · silence' : ` · peak ${midiName(Math.round(midi))} ${p.f.toFixed(1)}Hz${cents}`),
       58, y + 32);
+    if (db > -55) {
+      g.fillStyle = '#94a3b8';
+      g.fillText(
+        `acf ${ac.f > 0 ? ac.f.toFixed(1) + 'Hz' : '--'} ${ac.conf.toFixed(2)}` +
+        ` · zcr ${(zc / tb.length * 100).toFixed(1)}% · flat ${flat.toFixed(2)}`,
+        58, y + 46);
+    }
   });
 }
 
@@ -338,7 +417,7 @@ export function drawPitchTrack(canvas, sources, sr = 44100) {
     if (!src.analyser) continue;
     let tr = _tracks.get(src);
     if (!tr) { tr = []; _tracks.set(src, tr); }
-    const p = domPeak(src.analyser, sr);
+    const p = bestF0(src, sr);
     tr.push({ t: now, midi: p.db > -90 ? 69 + 12 * Math.log2(p.f / 440) : null });
     while (tr.length && now - tr[0].t > TRACK_WINDOW_MS) tr.shift();
     g.strokeStyle = src.color;
@@ -357,6 +436,92 @@ export function drawPitchTrack(canvas, sources, sr = 44100) {
     g.fillStyle = src.color;
     g.font = '9px ui-monospace, monospace';
     g.fillText(src.label, 8 + sources.indexOf(src) * 60, h - 4);
+
+    // vibrato readout: mean crossings + excursion in the last 3s
+    const VIB_SPAN_MS = 3000;
+    const pts = tr.filter(pt => pt.midi !== null && now - pt.t < VIB_SPAN_MS);
+    if (pts.length > 60) {
+      let mean = 0, lo = Infinity, hi = -Infinity;
+      for (const pt of pts) { mean += pt.midi; if (pt.midi < lo) lo = pt.midi; if (pt.midi > hi) hi = pt.midi; }
+      mean /= pts.length;
+      const depth = (hi - lo) / 2;
+      let cross = 0, above = pts[0].midi > mean;
+      for (const pt of pts) {
+        const a = pt.midi > mean;
+        if (a !== above) { cross++; above = a; }
+      }
+      const span = (pts[pts.length - 1].t - pts[0].t) / 1000;
+      const hz2 = cross / 2 / span;
+      if (cross >= 4 && depth > 0.04 && hz2 > 1 && hz2 < 12) {
+        g.fillStyle = src.color;
+        g.font = '9px ui-monospace, monospace';
+        const t2 = `vib ${hz2.toFixed(1)}Hz ±${depth.toFixed(2)}st`;
+        g.fillText(t2, w - g.measureText(t2).width - 6, 11);
+      }
+    }
+  }
+}
+
+const ENV_WINDOW_MS = 8000;
+const ONSET_RATIO = 1.7, ONSET_MIN_DB = 2.0, ONSET_GAP_MS = 80;
+const _env = new WeakMap(); // src -> {hist, prev, ema, onsets}
+
+// Envelope: scrolling RMS level per source with onset ticks detected
+// by spectral flux (sum of rising bin energy vs its own running mean).
+// Attacks show as vertical marks, so strum timing reads off the audio
+// itself rather than the MIDI event log.
+export function drawEnvelope(canvas, sources, sr = 44100) {
+  const { g, w, h } = prep(canvas);
+  g.clearRect(0, 0, w, h);
+  const now = performance.now();
+  const rowH = h / sources.length;
+  for (const [si, src] of sources.entries()) {
+    const y0 = si * rowH;
+    if (!src.analyser) continue;
+    let st = _env.get(src);
+    if (!st) { st = { hist: [], prev: null, ema: 0, onsets: [] }; _env.set(src, st); }
+    const tb = timeBuf(src.analyser);
+    let s = 0;
+    for (let i = 0; i < tb.length; i++) s += tb[i] * tb[i];
+    const db = 20 * Math.log10(Math.sqrt(s / tb.length) || 1e-9);
+    st.hist.push({ t: now, db });
+    while (st.hist.length && now - st.hist[0].t > ENV_WINDOW_MS) st.hist.shift();
+
+    const b = freqBuf(src.analyser), hz = sr / src.analyser.fftSize;
+    if (st.prev) {
+      const lo = Math.floor(FMIN / hz), hi = Math.min(b.length, Math.ceil(FMAX / hz));
+      let f = 0;
+      for (let i = lo; i < hi; i++) { const d = b[i] - st.prev[i]; if (d > 0) f += d; }
+      f /= (hi - lo);
+      const last = st.onsets[st.onsets.length - 1];
+      if (st.ema && f > st.ema * ONSET_RATIO && f > ONSET_MIN_DB &&
+          (last === undefined || now - last > ONSET_GAP_MS)) st.onsets.push(now);
+      st.ema = st.ema * 0.9 + f * 0.1;
+    }
+    st.prev = b.slice();
+    while (st.onsets.length && now - st.onsets[0] > ENV_WINDOW_MS) st.onsets.shift();
+
+    const base = y0 + rowH - 8, ph = rowH - 20;
+    g.strokeStyle = '#1e293b';
+    g.beginPath(); g.moveTo(0, base); g.lineTo(w, base); g.stroke();
+    g.fillStyle = src.color + '33';
+    g.beginPath();
+    g.moveTo(0, base);
+    for (const pt of st.hist) {
+      const x = w - (now - pt.t) / ENV_WINDOW_MS * w;
+      const v = Math.max(0, Math.min(1, (pt.db + 60) / 55));
+      g.lineTo(x, base - v * ph);
+    }
+    g.lineTo(w, base);
+    g.fill();
+    g.strokeStyle = src.color;
+    for (const t of st.onsets) {
+      const x = w - (now - t) / ENV_WINDOW_MS * w;
+      g.beginPath(); g.moveTo(x, y0 + 4); g.lineTo(x, y0 + 14); g.stroke();
+    }
+    g.fillStyle = src.color;
+    g.font = '9px ui-monospace, monospace';
+    g.fillText(`${src.label} ${db.toFixed(1)}dB`, 8, y0 + 13);
   }
 }
 
@@ -372,7 +537,7 @@ export function drawHarmonics(canvas, sources, sr = 44100) {
   let best = null;
   for (const src of sources) {
     if (!src.analyser) continue;
-    const p = domPeak(src.analyser, sr);
+    const p = bestF0(src, sr);
     if (!best || p.db > best.db) best = { ...p, src };
   }
   if (!best || best.db <= -90) {

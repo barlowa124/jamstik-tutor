@@ -223,11 +223,20 @@ centroid (brightness) in Hz, and the same dominant-peak note/cents
 readout as the spectrum. Pitch track scrolls the dominant peak across
 the last 8 seconds on a midi grid marked with octave lines and open
 strings, so vibrato, bends, and drift show as motion in the trace and
-silence breaks it. Harmonics samples the spectrum at f0*1 through
-f0*10 relative to the fundamental, a timbre fingerprint that separates
-a plucked string's falling comb from whatever a wavetable preset baked
-in. The spectrogram runs the same log-frequency axis with note
-gridlines.
+silence breaks it; sustained oscillation gets a live rate/depth tag
+(`vib 4.6Hz +/-0.3st`). The estimate runs two detectors: the spectral
+peak, and a normalized autocorrelation of the time domain that picks
+the smallest confident lag (the fix for the classic argmax octave-
+down error). When the two disagree by a semitone the ACF wins, which
+catches the spectrum locking onto a loud harmonic. Harmonics samples
+the spectrum at f0*1 through f0*10 relative to the fundamental, a
+timbre fingerprint that separates a plucked string's falling comb
+from whatever a wavetable preset baked in. Envelope scrolls the RMS
+level per source with onset ticks found by spectral flux, so pick
+attacks read off the audio itself. The meters row also reports the
+ACF estimate with its confidence, zero-crossing rate, and spectral
+flatness (tonal comb vs noise). The spectrogram runs the same
+log-frequency axis with note gridlines.
 
 The waterfall scrolls per-string lanes left over the last
 12 seconds, each note a colored bar from attack to release, taller when
@@ -246,8 +255,9 @@ js/audio.js         preset wavetable synth, FX chain, real-input capture,
                     recorder, metronome
 js/fretboard.js     canvas board: notes, bends, targets, scale overlay
 js/viz.js           scope / spectrum / spectrogram / chromagram / meters /
-                    pitch track / harmonics / wavetable / waterfall /
-                    staff / string decay
+                    pitch track / harmonics / envelope / wavetable /
+                    waterfall / staff / string decay; ACF + FFT pitch
+                    estimators, spectral-flux onsets
 js/modes.js         free play, chord trainer, scale drills, tuner, quiz
 ```
 
