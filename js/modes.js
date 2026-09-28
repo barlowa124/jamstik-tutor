@@ -478,6 +478,15 @@ const VIB_RATE_HI = 9;
 const TREM_ATTACKS = 8;
 const TREM_WINDOW_MS = 4000;
 const TREM_GAP_MS = 1500;
+// Progression-dictation loops, all diatonic triads/sevenths whose shapes
+// exist in CHORD_SHAPES so any voicing the player finds can be judged.
+const DICT_PROGS = [
+  ['C maj', 'G maj', 'A min'],
+  ['G maj', 'E min', 'C maj'],
+  ['C maj', 'F maj', 'G maj'],
+  ['A min', 'F maj', 'G maj'],
+  ['G maj', 'D maj', 'E min'],
+];
 
 // Count oscillation cycles in a pitch-bend stream by crossing its own
 // midline. Guitar vibrato bends up and returns to pitch, so each
@@ -526,7 +535,7 @@ export class Quiz {
       ['read', 'staff reading'], ['all', 'fretboard sweep'], ['dict', 'play it back'],
       ['ear', 'intervals by ear'], ['cear', 'chords by ear'],
       ['sus', 'let it ring'], ['mute', 'choke it'], ['vib', 'vibrato'],
-      ['trem', 'tremolo picking']]) {
+      ['trem', 'tremolo picking'], ['pdict', 'progression by ear']]) {
       this.kindSel.append(el('option', '', label));
       this.kindSel.lastChild.value = v;
     }
@@ -589,7 +598,7 @@ export class Quiz {
   ask() {
     let kind = this.kindSel.value;
     if (kind === 'mixed') {
-      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'read', 'all', 'dict', 'ear', 'cear', 'sus', 'mute', 'vib', 'trem'][Math.floor(Math.random() * 16)];
+      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'read', 'all', 'dict', 'ear', 'cear', 'sus', 'mute', 'vib', 'trem', 'pdict'][Math.floor(Math.random() * 17)];
     }
     this.sus = null;
     this.mute = null;
@@ -657,6 +666,16 @@ export class Quiz {
       this.prompt.textContent =
         `tremolo pick one note, ${TREM_ATTACKS} attacks inside ${TREM_WINDOW_MS / 1000}s`;
       this.verdict.textContent = '';
+      return;
+    }
+    if (kind === 'pdict') {
+      const prog = DICT_PROGS[Math.floor(Math.random() * DICT_PROGS.length)];
+      this.target = { kind, prog, ix: 0, done: false };
+      this.lastJudged = '';
+      this.dictRow.style.display = '';
+      this.prompt.textContent = `repeat the ${prog.length}-chord progression by ear`;
+      this.verdict.textContent = 'listening…';
+      this.playEar();
       return;
     }
     if (kind === 'ivb') {
@@ -1024,6 +1043,13 @@ export class Quiz {
       intervals.forEach((iv, i) => play(`ce${i}`, t.root + iv, 0, 1400));
     } else if (t.kind === 'dict') {
       t.midis.forEach((m, i) => play(`dic${i}`, m, i * 560, 480));
+    } else if (t.kind === 'pdict') {
+      t.prog.forEach((ch, i) => {
+        const shape = CHORD_SHAPES[ch] || {};
+        for (const [s, f] of Object.entries(shape)) {
+          if (f != null) play(`pd${i}s${s}`, OPEN_MIDI[+s] + f, i * 1100, 950);
+        }
+      });
     }
   }
 
@@ -1123,7 +1149,40 @@ export class Quiz {
     }
   }
 
-  onNotesChange() {}
+  onNotesChange() {
+    const t = this.target;
+    if (!t || t.kind !== 'pdict' || t.done) return;
+    // Chord answers are judged on the held set once it stops changing.
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.judgePdict(), 160);
+  }
+
+  judgePdict() {
+    const t = this.target;
+    if (!t || t.kind !== 'pdict' || t.done) return;
+    const held = [...this.app.held.values()].map(n => n.midi);
+    if (held.length < 3) return;
+    const fp = [...held].sort((a, b) => a - b).join(',');
+    if (fp === this.lastJudged) return;
+    this.lastJudged = fp;
+    const cur = t.prog[t.ix];
+    const cf = chordFromLabel(cur);
+    const gap = cf && chordGap(cf.root, cf.suffix, held);
+    if (gap?.exact) {
+      t.ix++;
+      if (t.ix >= t.prog.length) {
+        t.done = true;
+        this.hit((performance.now() - this.promptT) / 1000,
+          `${t.prog.join(', ')} replayed`);
+      } else {
+        this.verdict.textContent = `${cur} ✓ (${t.ix}/${t.prog.length}). Next chord`;
+        this.verdict.style.color = '#5eead4';
+      }
+    } else {
+      const heard = detectChord(held)?.label;
+      this.miss(`heard ${heard || 'something else'}, chord ${t.ix + 1} was ${cur}. Hear again ↻`);
+    }
+  }
 }
 
 // ── Chord changes ───────────────────────────────────────────────────────
@@ -1279,6 +1338,9 @@ export class RiffDrill {
     panel.append(el('div', 'hint',
       'Play the lit position, then the next. Wrong notes cost a miss but ' +
       'never your place in the pattern.'));
+    try {
+      this.best = JSON.parse(localStorage.getItem('jamstik-tutor-bests') || '{}');
+    } catch { this.best = {}; }
     this.reset();
   }
 
@@ -1330,7 +1392,10 @@ export class RiffDrill {
         const name = this.sel.value;
         const best = this.best ??= {};
         const isBest = !best[name] || dt < best[name];
-        if (isBest) best[name] = dt;
+        if (isBest) {
+          best[name] = dt;
+          try { localStorage.setItem('jamstik-tutor-bests', JSON.stringify(best)); } catch {}
+        }
         this.verdict.textContent =
           `riff complete, ${this.hits}/${this.hits + this.misses} in ${dt.toFixed(1)}s` +
           ` (best ${best[name].toFixed(1)}s${isBest ? ' *' : ''})`;
