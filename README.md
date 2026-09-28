@@ -136,6 +136,11 @@ sweep. You can also click frets on the board directly.
   it). *Choke it* asks for a note killed within 250ms of the attack, by
   mute or release. Both fall back to note on/off timing when the device
   sends no expression, and the verdict says so.
+  *Vibrato* asks for a note held while the pitch bend oscillates, and
+  scores cycle count, rate (2-9/s) and depth from the bend stream. With
+  no bend data the verdict says the device isn't sending it.
+  *Tremolo picking* asks for one note attacked 8 times inside 4 seconds
+  and reports the picking rate and the worst gap between attacks.
   Stats shown: `hits/tries`, streak, average response seconds, a
   running `today` tally, a 7-day total, and a per-day hit-rate bar row.
   Daily drill counts persist

@@ -470,6 +470,46 @@ const MUTE_AMP_FLOOR = 0.1;
 const MUTE_WINDOW_MS = 250;
 const MUTE_TIMEOUT_MS = 1500;
 const QUIZ_REASK_MS = 700;
+const VIB_MIN_SAMPLES = 8;
+const VIB_MIN_DEPTH = 0.1;   // semitones, peak-to-trough
+const VIB_MIN_CYCLES = 3;
+const VIB_RATE_LO = 2;       // Hz
+const VIB_RATE_HI = 9;
+const TREM_ATTACKS = 8;
+const TREM_WINDOW_MS = 4000;
+const TREM_GAP_MS = 1500;
+
+// Count oscillation cycles in a pitch-bend stream by crossing its own
+// midline. Guitar vibrato bends up and returns to pitch, so each
+// excursion crosses the midpoint twice.
+function analyzeVibrato(samples, ms) {
+  if (samples.length < VIB_MIN_SAMPLES) {
+    return { ok: false, why: 'no bend data seen. Vibrato needs per-string pitch bend' };
+  }
+  const vals = samples.map(s => s[1]);
+  const hi = Math.max(...vals), lo = Math.min(...vals);
+  const depth = hi - lo;
+  const mid = (hi + lo) / 2;
+  let crossings = 0;
+  for (let i = 1; i < vals.length; i++) {
+    if ((vals[i - 1] < mid) !== (vals[i] < mid)) crossings++;
+  }
+  const cycles = crossings / 2;
+  const rate = cycles / (ms / 1000);
+  if (depth < VIB_MIN_DEPTH) {
+    return { ok: false, why: `depth ${depth.toFixed(2)} semis. Push the bend further` };
+  }
+  if (cycles < VIB_MIN_CYCLES) {
+    return { ok: false, why: `only ${cycles.toFixed(1)} cycles. Keep oscillating` };
+  }
+  if (rate < VIB_RATE_LO || rate > VIB_RATE_HI) {
+    return { ok: false, why: `${rate.toFixed(1)} cycles/s. Aim for ${VIB_RATE_LO}-${VIB_RATE_HI}` };
+  }
+  return {
+    ok: true,
+    label: `${Math.round(cycles)} cycles at ${rate.toFixed(1)}/s, ${depth.toFixed(2)} semis deep`,
+  };
+}
 
 export class Quiz {
   constructor(app) { this.app = app; }
@@ -485,7 +525,8 @@ export class Quiz {
       ['dyn', 'dynamics'], ['hold', 'hold duration'], ['ivb', 'intervals on board'],
       ['read', 'staff reading'], ['all', 'fretboard sweep'], ['dict', 'play it back'],
       ['ear', 'intervals by ear'], ['cear', 'chords by ear'],
-      ['sus', 'let it ring'], ['mute', 'choke it']]) {
+      ['sus', 'let it ring'], ['mute', 'choke it'], ['vib', 'vibrato'],
+      ['trem', 'tremolo picking']]) {
       this.kindSel.append(el('option', '', label));
       this.kindSel.lastChild.value = v;
     }
@@ -541,15 +582,19 @@ export class Quiz {
     this.app.fretboard.targets = null;
     this.sus = null;
     this.mute = null;
+    this.vib = null;
+    this.trem = null;
   }
 
   ask() {
     let kind = this.kindSel.value;
     if (kind === 'mixed') {
-      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'read', 'all', 'dict', 'ear', 'cear', 'sus', 'mute'][Math.floor(Math.random() * 14)];
+      kind = ['note', 'spot', 'bend', 'arp', 'dyn', 'hold', 'ivb', 'read', 'all', 'dict', 'ear', 'cear', 'sus', 'mute', 'vib', 'trem'][Math.floor(Math.random() * 16)];
     }
     this.sus = null;
     this.mute = null;
+    this.vib = null;
+    this.trem = null;
     this.promptT = performance.now();
     this.app.fretboard.targets = null;
     this.earRow.style.display = kind === 'ear' ? '' : 'none';
@@ -597,6 +642,20 @@ export class Quiz {
     if (kind === 'mute') {
       this.target = { kind, window: MUTE_WINDOW_MS };
       this.prompt.textContent = `play a note and choke it within ${this.target.window}ms`;
+      this.verdict.textContent = '';
+      return;
+    }
+    if (kind === 'vib') {
+      const secs = 2 + Math.floor(Math.random() * 2);
+      this.target = { kind, secs };
+      this.prompt.textContent = `play a note and add vibrato for ${secs}s`;
+      this.verdict.textContent = '';
+      return;
+    }
+    if (kind === 'trem') {
+      this.target = { kind };
+      this.prompt.textContent =
+        `tremolo pick one note, ${TREM_ATTACKS} attacks inside ${TREM_WINDOW_MS / 1000}s`;
       this.verdict.textContent = '';
       return;
     }
@@ -749,6 +808,30 @@ export class Quiz {
       }
       return;
     }
+    if (t.kind === 'vib') {
+      const v = this.vib;
+      if (v?.active && performance.now() - v.t0 >= t.secs * 1000) {
+        const ms = performance.now() - v.t0;
+        this.vib = null;
+        const res = analyzeVibrato(v.samples, ms);
+        if (res.ok) this.hit((performance.now() - this.promptT) / 1000, res.label);
+        else this.miss(res.why);
+      }
+      return;
+    }
+    if (t.kind === 'trem') {
+      const tr = this.trem;
+      if (tr && tr.hits.length) {
+        const gap = performance.now() - tr.hits[tr.hits.length - 1];
+        const span = performance.now() - tr.hits[0];
+        if (span > TREM_WINDOW_MS || gap > TREM_GAP_MS) {
+          const n = tr.hits.length;
+          this.trem = null;
+          this.miss(`${n} attack${n === 1 ? '' : 's'} in ${(span / 1000).toFixed(1)}s. Keep the motion going`);
+        }
+      }
+      return;
+    }
     if (t.kind !== 'all') return;
     const left = t.deadline - performance.now();
     if (left <= 0) {
@@ -791,6 +874,40 @@ export class Quiz {
         this.mute = { str, midi, t0: performance.now(), active: true };
         this.verdict.textContent = 'now choke it';
         this.verdict.style.color = '#5eead4';
+      }
+      return;
+    }
+    if (t.kind === 'vib') {
+      if (!this.vib?.active) {
+        this.vib = { str, midi, t0: performance.now(), samples: [], active: true };
+        this.verdict.textContent = `vibrato for ${t.secs}s. Oscillate the bend`;
+        this.verdict.style.color = '#5eead4';
+      }
+      return;
+    }
+    if (t.kind === 'trem') {
+      const now = performance.now();
+      if (!this.trem) {
+        this.trem = { midi, hits: [now] };
+        this.verdict.textContent = 'keep picking, same note';
+        this.verdict.style.color = '#5eead4';
+      } else {
+        if (midi === this.trem.midi) {
+          this.trem.hits.push(now);
+        } else {
+          this.trem = { midi, hits: [now] };
+          this.verdict.textContent = `one note at a time, restarted on ${midiName(midi)}`;
+          this.verdict.style.color = '#f87171';
+        }
+        const span = now - this.trem.hits[0];
+        if (this.trem.hits.length >= TREM_ATTACKS && span <= TREM_WINDOW_MS) {
+          const gaps = this.trem.hits.slice(1).map((h, j) => h - this.trem.hits[j]);
+          const worst = Math.max(...gaps);
+          const rate = (this.trem.hits.length - 1) / (span / 1000);
+          this.trem = null;
+          this.hit((performance.now() - this.promptT) / 1000,
+            `${rate.toFixed(1)} attacks/s, worst gap ${Math.round(worst)}ms`);
+        }
       }
       return;
     }
@@ -970,6 +1087,12 @@ export class Quiz {
       this.choke();
       return;
     }
+    if (t.kind === 'vib' && this.vib?.active && midi === this.vib.midi) {
+      const elapsed = (performance.now() - this.vib.t0) / 1000;
+      this.vib = null;
+      if (elapsed < t.secs) this.miss(`released at ${elapsed.toFixed(1)}s, hold the note while you shake it`);
+      return;
+    }
     if (t.kind !== 'hold' || this.holdMidi === null || midi !== this.holdMidi) return;
     const held = performance.now() - this.holdT;
     this.holdMidi = null;
@@ -986,7 +1109,12 @@ export class Quiz {
 
   onBend(str, semis) {
     const t = this.target;
-    if (!t || t.kind !== 'bend' || t.done) return;
+    if (!t || t.done) return;
+    if (t.kind === 'vib' && this.vib?.active && (str == null || str === this.vib.str)) {
+      this.vib.samples.push([performance.now(), semis]);
+      return;
+    }
+    if (t.kind !== 'bend') return;
     // Hit when any held note sits within ±12 cents of the target bend.
     const hit = [...this.app.held.values()].some(n => Math.abs(n.bend - t.steps) <= 0.12);
     if (hit) {
