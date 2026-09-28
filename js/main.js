@@ -4,7 +4,7 @@ import { OPEN_MIDI, midiName, inferString, setTuning, setTuningValues, TUNINGS, 
 import { MidiEngine, VirtualJamstik, MidiRecorder, MidiPlayer, parseSmf } from './midi.js';
 import { SynthEngine, RealInput, Metronome, SessionRecorder, PRESETS, PRESET_CATS, VELOCITY_CURVES } from './audio.js';
 import { Fretboard } from './fretboard.js';
-import { drawScope, drawSpectrum, drawChroma, drawMeters, drawWavetable, drawWaterfall, drawStaff, drawStrings, Spectrogram } from './viz.js';
+import { drawScope, drawSpectrum, drawChroma, drawMeters, drawPitchTrack, drawHarmonics, drawWavetable, drawWaterfall, drawStaff, drawStrings, Spectrogram } from './viz.js';
 import { FreePlay, ChordTrainer, ScaleDrill, Tuner, Quiz, ChordChanges, RiffDrill, RhythmDrill } from './modes.js';
 
 const $ = id => document.getElementById(id);
@@ -519,18 +519,24 @@ function buildSoundsPanel() {
 
 // ── Render loop ─────────────────────────────────────────────────────────
 const spectro = { g: null };
+// Source objects stay stable across frames so per-source state keyed by
+// identity (pitch-track history, spectrum peak hold) accumulates.
+const synthSrc = { analyser: null, color: '#5eead4', label: 'synth' };
+const realSrc = { analyser: null, color: '#f472b6', label: 'input' };
 
 function frame() {
   app.fretboard.draw();
-  const synthSrc = { analyser: app.synth.analyser, color: '#5eead4', label: 'synth' };
-  const realSrc = { analyser: app.real.analyser, color: '#f472b6', label: 'input' };
+  synthSrc.analyser = app.synth.analyser;
+  realSrc.analyser = app.real.analyser;
   const srcs = [synthSrc, realSrc];
   const sr = app.synth.ctx?.sampleRate || 44100;
   drawScope($('scope'), srcs);
   drawSpectrum($('spectrum'), srcs, app.held, sr);
   drawChroma($('chroma'), srcs, sr);
   drawMeters($('meters'), srcs, sr);
-  spectro.g.draw(app.synth.analyser);
+  drawPitchTrack($('pitchtrack'), srcs, sr);
+  drawHarmonics($('harmonics'), srcs, sr);
+  spectro.g.draw(app.synth.analyser, sr);
   drawWaterfall($('waterfall'), app.history, app.held, performance.now());
   drawStaff($('staff'), [...app.held.values()].map(n => n.midi));
   drawStrings($('strings'), app.exprLanes, app.exprCcSeen, performance.now(),

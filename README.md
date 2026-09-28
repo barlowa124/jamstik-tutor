@@ -220,7 +220,14 @@ The chromagram folds all FFT energy into the 12 pitch classes, one bar
 each, so chord quality reads directly out of the audio. Level and tone
 gives each source an RMS bar plus numbers: level in dB, spectral
 centroid (brightness) in Hz, and the same dominant-peak note/cents
-readout as the spectrum.
+readout as the spectrum. Pitch track scrolls the dominant peak across
+the last 8 seconds on a midi grid marked with octave lines and open
+strings, so vibrato, bends, and drift show as motion in the trace and
+silence breaks it. Harmonics samples the spectrum at f0*1 through
+f0*10 relative to the fundamental, a timbre fingerprint that separates
+a plucked string's falling comb from whatever a wavetable preset baked
+in. The spectrogram runs the same log-frequency axis with note
+gridlines.
 
 The waterfall scrolls per-string lanes left over the last
 12 seconds, each note a colored bar from attack to release, taller when
@@ -239,7 +246,8 @@ js/audio.js         preset wavetable synth, FX chain, real-input capture,
                     recorder, metronome
 js/fretboard.js     canvas board: notes, bends, targets, scale overlay
 js/viz.js           scope / spectrum / spectrogram / chromagram / meters /
-                    wavetable / waterfall / staff / string decay
+                    pitch track / harmonics / wavetable / waterfall /
+                    staff / string decay
 js/modes.js         free play, chord trainer, scale drills, tuner, quiz
 ```
 

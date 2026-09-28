@@ -231,9 +231,9 @@ export function drawMeters(canvas, sources, sr = 44100) {
       const a = Math.pow(10, b[i] / 20);
       num += i * hz * a; den += a;
     }
-    const cent = den > 0 ? num / den : 0;
+    const cent = den > 0 && db > -55 ? `${(num / den).toFixed(0)}Hz` : '--';
     const p = domPeak(src.analyser, sr);
-    const midi = p.db > -90 ? 69 + 12 * Math.log2(p.f / 440) : null;
+    const midi = p.db > -90 && db > -55 ? 69 + 12 * Math.log2(p.f / 440) : null;
     const cents = midi === null ? '' : ` ${(Math.round((midi - Math.round(midi)) * 100) >= 0 ? '+' : '')}${Math.round((midi - Math.round(midi)) * 100)}c`;
 
     const lvl = Math.max(0, Math.min(1, (db + 60) / 55));
@@ -246,7 +246,7 @@ export function drawMeters(canvas, sources, sr = 44100) {
     g.fillText(src.label, 10, y + 32);
     g.fillStyle = '#cbd5e1';
     g.fillText(
-      `${db.toFixed(1)}dB · bright ${cent.toFixed(0)}Hz` +
+      `${db.toFixed(1)}dB · bright ${cent}` +
       (midi === null ? ' · silence' : ` · peak ${midiName(Math.round(midi))} ${p.f.toFixed(1)}Hz${cents}`),
       58, y + 32);
   });
@@ -259,7 +259,7 @@ export class Spectrogram {
     this.off = document.createElement('canvas');
   }
 
-  draw(analyser) {
+  draw(analyser, sr = 44100) {
     const { g, w, h } = prep(this.cv);
     if (this.off.width !== this.cv.width || this.off.height !== this.cv.height) {
       this.off.width = this.cv.width;
@@ -274,18 +274,135 @@ export class Spectrogram {
     og.fillStyle = '#0b1120';
     og.fillRect(this.cv.width - 2, 0, 2, this.cv.height);
     if (analyser) {
-      const buf = new Uint8Array(256);
-      analyser.getByteFrequencyData(buf);
-      const dpr = window.devicePixelRatio || 1;
-      for (let i = 0; i < this.cv.height; i++) {
-        const bin = Math.floor(Math.pow(buf.length, 1 - i / this.cv.height));
-        const v = buf[Math.min(bin, buf.length - 1)] / 255;
+      const b = freqBuf(analyser), hz = sr / analyser.fftSize;
+      const rows = this.cv.height;
+      for (let i = 0; i < rows; i++) {
+        // row i from bottom maps to log frequency in the guitar band
+        const f = FMIN * Math.pow(FMAX / FMIN, i / rows);
+        const bi = Math.min(b.length - 1, Math.round(f / hz));
+        const v = Math.max(0, Math.min(1, (b[bi] + 100) / 70));
         og.fillStyle = `hsl(${190 + v * 80}, ${40 + v * 60}%, ${8 + v * 55}%)`;
         og.fillRect(this.cv.width - 2, this.cv.height - 1 - i, 2, 1);
       }
     }
     g.drawImage(this.off, 0, 0, w, h);
+    // note gridlines drawn over the scrolled image each frame
+    for (let m = 0; m < 128; m++) {
+      const f = 440 * Math.pow(2, (m - 69) / 12);
+      if (f < FMIN || f > FMAX) continue;
+      const y = h - h * Math.log2(f / FMIN) / Math.log2(FMAX / FMIN);
+      const isC = ((m % 12) + 12) % 12 === 0;
+      g.strokeStyle = isC ? '#33415577' : '#1a243655';
+      g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+      if (isC) {
+        g.fillStyle = '#64748b';
+        g.font = '8px ui-monospace, monospace';
+        g.fillText(midiName(m), 3, y - 2);
+      }
+    }
   }
+}
+
+const TRACK_WINDOW_MS = 8000;
+const TRACK_MIDI_LO = 36, TRACK_MIDI_HI = 84; // C2..C6
+const _tracks = new WeakMap(); // src -> [{t, midi}]
+
+// Pitch track: dominant-peak note traced over the last 8s on a midi
+// grid. Makes vibrato, bends, and drift visible as motion in the line.
+// Silent frames break the trace rather than drawing a false pitch.
+export function drawPitchTrack(canvas, sources, sr = 44100) {
+  const { g, w, h } = prep(canvas);
+  g.clearRect(0, 0, w, h);
+  const now = performance.now();
+  const my = m => h - 14 - (m - TRACK_MIDI_LO) / (TRACK_MIDI_HI - TRACK_MIDI_LO) * (h - 24);
+  for (let m = TRACK_MIDI_LO; m <= TRACK_MIDI_HI; m++) {
+    const isC = ((m % 12) + 12) % 12 === 0;
+    const y = my(m);
+    g.strokeStyle = isC ? '#334155' : '#1a2436';
+    g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+    if (isC) {
+      g.fillStyle = '#64748b';
+      g.font = '8px ui-monospace, monospace';
+      g.fillText(midiName(m), 3, y - 2);
+    }
+  }
+  for (const [n, f] of Object.entries(OPEN_STRING_HZ)) {
+    const m = 69 + 12 * Math.log2(f / 440);
+    if (m >= TRACK_MIDI_LO && m <= TRACK_MIDI_HI) {
+      g.fillStyle = '#94a3b8';
+      g.font = '8px ui-monospace, monospace';
+      g.fillText(n, w - 14, my(m) - 2);
+    }
+  }
+  for (const src of sources) {
+    if (!src.analyser) continue;
+    let tr = _tracks.get(src);
+    if (!tr) { tr = []; _tracks.set(src, tr); }
+    const p = domPeak(src.analyser, sr);
+    tr.push({ t: now, midi: p.db > -90 ? 69 + 12 * Math.log2(p.f / 440) : null });
+    while (tr.length && now - tr[0].t > TRACK_WINDOW_MS) tr.shift();
+    g.strokeStyle = src.color;
+    g.lineWidth = 2;
+    g.beginPath();
+    let pen = false;
+    for (const pt of tr) {
+      if (pt.midi === null) { pen = false; continue; }
+      const x = w - (now - pt.t) / TRACK_WINDOW_MS * w;
+      const y = my(pt.midi);
+      if (pen) g.lineTo(x, y); else g.moveTo(x, y);
+      pen = true;
+    }
+    g.stroke();
+    g.lineWidth = 1;
+    g.fillStyle = src.color;
+    g.font = '9px ui-monospace, monospace';
+    g.fillText(src.label, 8 + sources.indexOf(src) * 60, h - 4);
+  }
+}
+
+const HARMONIC_COUNT = 10;
+
+// Harmonic profile: energy at f0 * 1..10 relative to the fundamental,
+// for the loudest source. A timbre fingerprint: a plucked string shows
+// the classic falling comb, a synth lead shows whatever the wavetable
+// baked in.
+export function drawHarmonics(canvas, sources, sr = 44100) {
+  const { g, w, h } = prep(canvas);
+  g.clearRect(0, 0, w, h);
+  let best = null;
+  for (const src of sources) {
+    if (!src.analyser) continue;
+    const p = domPeak(src.analyser, sr);
+    if (!best || p.db > best.db) best = { ...p, src };
+  }
+  if (!best || best.db <= -90) {
+    g.fillStyle = '#475569';
+    g.font = '10px ui-monospace, monospace';
+    g.fillText('silence', 10, h / 2);
+    return;
+  }
+  const b = freqBuf(best.src.analyser), hz = sr / best.src.analyser.fftSize;
+  const amps = [];
+  for (let k = 1; k <= HARMONIC_COUNT; k++) {
+    const bi = Math.round(best.f * k / hz);
+    if (bi >= b.length) break;
+    let v = -140;
+    for (let i = Math.max(0, bi - 1); i <= Math.min(b.length - 1, bi + 1); i++) v = Math.max(v, b[i]);
+    amps.push(Math.pow(10, v / 20));
+  }
+  const ref = amps[0] || 1;
+  const bw = (w - 20) / amps.length;
+  const midi = 69 + 12 * Math.log2(best.f / 440);
+  g.fillStyle = best.src.color;
+  g.font = '9px ui-monospace, monospace';
+  g.fillText(`${best.src.label} f0 ${midiName(Math.round(midi))} ${best.f.toFixed(1)}Hz`, 10, 12);
+  amps.forEach((a, i) => {
+    const v = a / ref;
+    g.fillStyle = best.src.color + 'bb';
+    g.fillRect(10 + i * bw, h - 16 - v * (h - 34), bw - 2, v * (h - 34));
+    g.fillStyle = '#64748b';
+    g.fillText(`x${i + 1}`, 10 + i * bw + bw / 2 - 6, h - 4);
+  });
 }
 
 // Wavetable viewer: one period of each preset currently assigned,
