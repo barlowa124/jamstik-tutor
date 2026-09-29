@@ -199,7 +199,7 @@ playback-side surface of the Jamstik Creator app:
   CC11 decay, each on the channel matching that string (str 1-6 ->
   ch 1-6). That is the per-channel stream a DAW reads as MPE-style
   articulation. On macOS, enable the IAC bus in *Audio MIDI Setup* and
-  it appears in the list. Point Bitwig, Ableton, Logic, or REAPER at
+  it appears in the list. Point Bitwig, Ableton, Logic or REAPER at
   the same bus. Route the DAW's audio back through a loopback device
   (BlackHole) into `enable audio in` and every analysis cell measures
   what the instrument rendered. Switching ports mid-hold sends
@@ -247,7 +247,7 @@ also lists its `heard` notes: spectral peaks found in the audio and
 named as pitches, independent of whatever MIDI says is held.
 
 The chromagram folds all FFT energy into the 12 pitch classes, one bar
-each, so chord quality reads directly out of the audio; a slow energy
+each, so chord quality reads directly out of the audio. A slow energy
 accumulator feeds a Krumhansl-Schmuckler key estimate next to each
 source label (`est. Am`). The harmony-trail cell scrolls the same
 folded energy as a 12-row heatmap per source, so chord changes and
@@ -256,8 +256,8 @@ gives each source an RMS bar plus numbers: level in dB, spectral
 centroid (brightness) in Hz, and the same dominant-peak note/cents
 readout as the spectrum. Pitch track scrolls the dominant peak across
 the last 8 seconds on a midi grid marked with octave lines and open
-strings, so vibrato, bends, and drift show as motion in the trace and
-silence breaks it; sustained oscillation gets a live rate/depth tag
+strings, so vibrato, bends and drift show as motion in the trace and
+silence breaks it. Sustained oscillation gets a live rate/depth tag
 (`vib 4.6Hz +/-0.3st`). The estimate runs two detectors: the spectral
 peak, and a normalized autocorrelation of the time domain that picks
 the smallest confident lag (the fix for the classic argmax octave-
@@ -268,7 +268,7 @@ timbre fingerprint that separates a plucked string's falling comb
 from whatever a wavetable preset baked in, plus an inharmonicity B
 coefficient fitted from measured partial frequencies. Envelope
 scrolls the RMS level per source with onset ticks found by spectral
-flux, so pick attacks read off the audio itself; the newest onset
+flux, so pick attacks read off the audio itself. The newest onset
 gets its attack time in ms, and a run of 4+ onsets yields a tempo
 estimate. The meters row also reports the ACF estimate with its
 confidence, zero-crossing rate, spectral flatness (tonal comb vs
