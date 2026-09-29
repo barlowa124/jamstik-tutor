@@ -117,7 +117,7 @@ const handlers = {
       str = pos.string;
       inferred = true;
     }
-    app.held.set(key, { str, midi, rawMidi, vel, bend: 0, inferred, amp: 1 });
+    app.held.set(key, { str, midi, rawMidi, vel, bend: 0, inferred, amp: 1, lastAct: performance.now() });
     app.history.push({ key, str, midi, vel, t0: performance.now(), t1: null, inferred });
     if (app.history.length > 2000) app.history.shift();
     app.midiRec?.add(true, inferred ? null : str, midi, vel, rawMidi);
@@ -130,11 +130,17 @@ const handlers = {
   },
   onNoteOff(key, str, rawMidi) {
     // Match on the RAW midi so a transpose change mid-hold can't orphan
-    // the voice. If the key matches but the raw pitch differs, the off is
-    // a stale release for a note that was already re-picked — ignore it.
+    // the voice. If the key matches but the raw pitch differs, the off
+    // may be a stale release for a re-picked note — but only inside the
+    // re-pick window (~500ms). Outside it, the channel-level off is
+    // evidence the physical note ended; release whatever we hold.
     let k = key;
     let n = app.held.get(k);
-    if (n && n.rawMidi !== rawMidi) return;
+    if (n && n.rawMidi !== rawMidi) {
+      const hit = [...app.held.entries()].find(([kk, v]) => kk !== k && v.rawMidi === rawMidi);
+      if (hit) { k = hit[0]; n = hit[1]; }
+      else if (performance.now() - n.lastAct < 500) return;
+    }
     if (!n) {
       const hit = [...app.held.entries()].find(([, v]) => v.rawMidi === rawMidi);
       if (hit) { k = hit[0]; n = hit[1]; }
@@ -173,7 +179,7 @@ const handlers = {
       return;
     }
     const hit = [...app.held.entries()].find(([, v]) => v.str === str);
-    if (hit) hit[1].bend = semis;
+    if (hit) { hit[1].bend = semis; hit[1].lastAct = performance.now(); }
     const f = app.fretboard.active.get(str);
     if (f) f.bend = semis;
     app.synth.bend(hit ? hit[0] : `s${str}`, semis);
@@ -190,12 +196,12 @@ const handlers = {
     if (str != null) {
       pushExpr(str, v);
       const n = app.held.get(`s${str}`);
-      if (n) n.amp = v;
+      if (n) { n.amp = v; n.lastAct = performance.now(); }
       const f = app.fretboard.active.get(str);
       if (f) f.amp = v;
       app.synth.setExpression(`s${str}`, v);
     } else {
-      for (const [k, n] of app.held) { n.amp = v; app.synth.setExpression(k, v); pushExpr(n.str, v); }
+      for (const [k, n] of app.held) { n.amp = v; n.lastAct = performance.now(); app.synth.setExpression(k, v); pushExpr(n.str, v); }
       for (const f of app.fretboard.active.values()) f.amp = v;
     }
     app.mode?.onExpression?.(str, v);
@@ -578,6 +584,17 @@ function init() {
   // Anything else is an orphaned drone; cull on the next sweep and log
   // it so the leak path stays diagnosable.
   setInterval(() => {
+    // Stale held notes: a held entry with no channel activity past the
+    // bound is a dropped-off zombie. On a Jamstik streaming CC11, real
+    // holds refresh constantly; without it, 30s still clears the residue
+    // while leaving long sustain drills alone.
+    const now = performance.now();
+    for (const [k, n] of [...app.held]) {
+      if (now - n.lastAct > 30000) {
+        logMidi(`stale s${n.str} released`);
+        handlers.onNoteOff(k, null, n.rawMidi);
+      }
+    }
     if (!app.synth.voices?.size) return;
     for (const k of app.synth.cullOrphans(app.held))
       logMidi(`culled stuck voice ${k}`);
