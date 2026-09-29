@@ -4,7 +4,7 @@ import { OPEN_MIDI, midiName, inferString, setTuning, setTuningValues, TUNINGS, 
 import { MidiEngine, VirtualJamstik, MidiRecorder, MidiPlayer, parseSmf } from './midi.js';
 import { SynthEngine, RealInput, Metronome, SessionRecorder, PRESETS, PRESET_CATS, VELOCITY_CURVES } from './audio.js';
 import { Fretboard } from './fretboard.js';
-import { drawScope, drawSpectrum, drawChroma, drawMeters, drawPitchTrack, drawHarmonics, drawEnvelope, drawWavetable, drawWaterfall, drawStaff, drawStrings, Spectrogram, ChromaHistory } from './viz.js';
+import { drawScope, drawSpectrum, drawChroma, drawMeters, drawPitchTrack, drawHarmonics, drawEnvelope, drawWavetable, drawWaterfall, drawStaff, drawStrings, Spectrogram, ChromaHistory, drawPeriodicity } from './viz.js';
 import { FreePlay, ChordTrainer, ScaleDrill, Tuner, Quiz, ChordChanges, RiffDrill, RhythmDrill } from './modes.js';
 
 const $ = id => document.getElementById(id);
@@ -532,6 +532,7 @@ function frame() {
   const srcs = [synthSrc, realSrc];
   const sr = app.synth.ctx?.sampleRate || 44100;
   drawScope($('scope'), srcs, sr);
+  drawPeriodicity($('acf'), srcs, sr);
   drawSpectrum($('spectrum'), srcs, app.held, sr);
   drawChroma($('chroma'), srcs, sr);
   drawMeters($('meters'), srcs, sr);

@@ -98,6 +98,54 @@ function domPeak(an, sr) {
   return { f, db: c };
 }
 
+// Periodicity: the normalized autocorrelation curve itself, drawn on a
+// log-frequency axis, with the lag the estimator picked marked. Shows
+// *why* the pitch answer is what it is — a confident tone is a tall
+// spike, a chord smears it into multiple peaks, noise is flat.
+export function drawPeriodicity(canvas, sources, sr = 44100) {
+  const { g, w, h } = prep(canvas);
+  g.clearRect(0, 0, w, h);
+  const fLo = ACF_MIN_HZ, fHi = ACF_MAX_HZ;
+  const fx = f => w * Math.log2(f / fLo) / Math.log2(fHi / fLo);
+  const vy = v => 6 + (1 - (Math.max(-0.3, Math.min(1.05, v)) + 0.3) / 1.35) * (h - 24);
+  // zero line + open-string grid
+  g.strokeStyle = '#1e293b';
+  g.beginPath(); g.moveTo(0, vy(0)); g.lineTo(w, vy(0)); g.stroke();
+  g.font = '8px ui-monospace, monospace';
+  for (const [n, f] of Object.entries(OPEN_STRING_HZ)) {
+    if (f < fLo || f > fHi) continue;
+    const x = fx(f);
+    g.strokeStyle = '#16202f';
+    g.beginPath(); g.moveTo(x, 4); g.lineTo(x, h - 16); g.stroke();
+    g.fillStyle = '#334155';
+    g.fillText(n, x + 1, h - 4);
+  }
+  for (const src of sources) {
+    if (!src.analyser) continue;
+    const c = acfPitch(src.analyser, sr); // cached: same scan the estimators used this frame
+    g.beginPath();
+    g.strokeStyle = src.color;
+    g.lineWidth = 1.2;
+    for (let lag = c.lagLo; lag <= c.lagHi; lag++) {
+      const x = fx(c.sre / lag), y = vy(c.vals[lag]);
+      lag === c.lagLo ? g.moveTo(x, y) : g.lineTo(x, y);
+    }
+    g.stroke();
+    g.fillStyle = src.color;
+    g.font = '9px ui-monospace, monospace';
+    g.fillText(src.label, 8 + sources.indexOf(src) * 60, 11);
+    if (c.pick) {
+      const x = fx(c.sre / c.pick);
+      g.strokeStyle = src.color;
+      g.setLineDash([3, 3]);
+      g.beginPath(); g.moveTo(x, 4); g.lineTo(x, h - 16); g.stroke();
+      g.setLineDash([]);
+      const t = `${c.f.toFixed(1)}Hz · ${c.conf.toFixed(2)}`;
+      g.fillText(t, Math.min(x + 3, w - g.measureText(t).width - 4), 11);
+    }
+  }
+}
+
 // Autocorrelation f0: normalized ACF over a 4x-downsampled time buffer.
 // Catches the spectral peak's failure mode (locking onto a loud
 // harmonic instead of the fundamental) — a periodic signal correlates
@@ -106,7 +154,13 @@ const ACF_DS = 4;
 const ACF_MIN_HZ = 60, ACF_MAX_HZ = 1400;
 const _ds = new Float32Array(4096);
 
-function acfPitch(an, sr) {
+// acfPitch is called by several renderers per frame (scope ticks,
+// pitch track, harmonics, meters, tuner) — cache per analyser per
+// ~frame so the ~360k-mult scan runs once. The retained `vals` curve
+// also feeds the periodicity cell.
+const _acfCache = new WeakMap(); // analyser -> {bucket, f, conf, vals, lagLo, lagHi, sre, pick}
+
+function acfCompute(an, sr) {
   const t = timeBuf(an);
   const n = Math.min(_ds.length, t.length / ACF_DS) | 0;
   const sre = sr / ACF_DS;
@@ -117,10 +171,10 @@ function acfPitch(an, sr) {
     _ds[i] = v; e += v * v;
   }
   const r0 = e / n;
-  if (r0 < 1e-8) return { f: 0, conf: 0 };
   const lagLo = Math.max(2, Math.floor(sre / ACF_MAX_HZ));
   const lagHi = Math.min(n >> 1, Math.floor(sre / ACF_MIN_HZ));
   const vals = new Float32Array(lagHi + 1);
+  if (r0 < 1e-8) return { f: 0, conf: 0, vals, lagLo, lagHi, sre, pick: 0 };
   let bv = -1;
   for (let lag = lagLo; lag <= lagHi; lag++) {
     let s = 0;
@@ -137,12 +191,23 @@ function acfPitch(an, sr) {
   for (let lag = lagLo; lag <= lagHi; lag++) {
     if (vals[lag] > Math.max(0.5, 0.85 * bv)) { bl = lag; break; }
   }
-  if (bl <= 0) return { f: 0, conf: 0 };
+  if (bl <= 0) return { f: 0, conf: 0, vals, lagLo, lagHi, sre, pick: 0 };
   // parabolic refinement on the correlation peak
   const ac = l => { let s = 0; const m = n - l; for (let i = 0; i < m; i++) s += _ds[i] * _ds[i + l]; return s / m / r0; };
   const l = ac(bl - 1), c = vals[bl], r = ac(bl + 1);
   const shift = Math.max(-0.5, Math.min(0.5, 0.5 * (l - r) / ((l - 2 * c + r) || 1e-9)));
-  return { f: sre / (bl + shift), conf: vals[bl] };
+  return { f: sre / (bl + shift), conf: vals[bl], vals, lagLo, lagHi, sre, pick: bl };
+}
+
+function acfPitch(an, sr) {
+  const bucket = Math.floor(performance.now() / 16); // ~once per frame
+  let c = _acfCache.get(an);
+  if (!c || c.bucket !== bucket) {
+    c = acfCompute(an, sr);
+    c.bucket = bucket;
+    _acfCache.set(an, c);
+  }
+  return c;
 }
 
 const ACF_CONF = 0.45; // below this the ACF estimate is noise
@@ -158,6 +223,32 @@ export function bestF0(src, sr) {
     if (dm > 1 || sp.db < -80) return { f: ac.f, db: sp.db, est: 'acf', acf: ac };
   }
   return { f: sp.f, db: sp.db, est: 'fft', acf: ac };
+}
+
+// Spectral peak finder: local maxima on the float FFT, gated to peaks
+// within 42dB of the loudest (or -60dB absolute), merged within a
+// semitone. This is the audio-side "what notes are actually sounding"
+// list — independent of whatever MIDI says is held.
+function findPeaks(an, sr, maxN = 7) {
+  const b = freqBuf(an), hz = sr / an.fftSize;
+  const lo = Math.floor(FMIN / hz), hi = Math.min(b.length - 2, Math.ceil(FMAX / hz));
+  let gmax = -140;
+  for (let i = lo; i <= hi; i++) if (b[i] > gmax) gmax = b[i];
+  if (gmax < -60) return [];
+  const floor = Math.max(-60, gmax - 42);
+  const pk = [];
+  for (let i = lo + 1; i < hi; i++) {
+    if (b[i] >= b[i - 1] && b[i] > b[i + 1] && b[i] > floor)
+      pk.push({ f: i * hz, db: b[i] });
+  }
+  pk.sort((a, c) => c.db - a.db);
+  const keep = [];
+  for (const p of pk) {
+    if (keep.length >= maxN) break;
+    if (keep.some(k => Math.abs(12 * Math.log2(p.f / k.f)) < 1)) continue;
+    keep.push(p);
+  }
+  return keep.sort((a, c) => a.f - c.f);
 }
 
 const OPEN_STRING_HZ = { E2: 82.41, A2: 110, D3: 146.83, G3: 196, B3: 246.94, E4: 329.63 };
@@ -238,6 +329,13 @@ export function drawSpectrum(canvas, sources, held, sr = 44100) {
     g.fillStyle = src.color;
     g.font = '9px ui-monospace, monospace';
     g.fillText(src.label, 8 + si * 60, h - 4);
+    const heard = findPeaks(src.analyser, sr)
+      .map(p => midiName(Math.round(69 + 12 * Math.log2(p.f / 440))))
+      .join(' ');
+    if (heard) {
+      g.fillStyle = src.color + 'cc';
+      g.fillText(`heard ${heard}`, 8 + si * 60 + 34, h - 4);
+    }
   });
 
   // dominant peak readout: nearest note + cents off, loudest source wins
@@ -416,6 +514,15 @@ export function drawMeters(canvas, sources, sr = 44100) {
     }
     const cent = den > 0 && db > -55 ? `${(num / den).toFixed(0)}Hz` : '--';
     const flat = cnt ? Math.exp(lg / cnt) / (den / cnt + 1e-12) : 0;
+    // spectral rolloff: frequency holding 85% of band energy
+    let roll = '--';
+    if (den > 0 && db > -55) {
+      let cum = 0;
+      for (let i = Math.floor(FMIN / hz); i < Math.min(b.length, Math.ceil(FMAX / hz)); i++) {
+        cum += Math.pow(10, b[i] / 20);
+        if (cum >= den * 0.85) { roll = `${(i * hz).toFixed(0)}Hz`; break; }
+      }
+    }
     const p = domPeak(src.analyser, sr);
     const midi = p.db > -90 && db > -55 ? 69 + 12 * Math.log2(p.f / 440) : null;
     const cents = midi === null ? '' : ` ${(Math.round((midi - Math.round(midi)) * 100) >= 0 ? '+' : '')}${Math.round((midi - Math.round(midi)) * 100)}c`;
@@ -448,7 +555,7 @@ export function drawMeters(canvas, sources, sr = 44100) {
       g.fillText(
         `acf ${ac.f > 0 ? ac.f.toFixed(1) + 'Hz' : '--'} ${ac.conf.toFixed(2)}` +
         ` · zcr ${(zc / tb.length * 100).toFixed(1)}% · flat ${flat.toFixed(2)}` +
-        ` · crest ${crest.toFixed(1)}`,
+        ` · crest ${crest.toFixed(1)} · roll ${roll}`,
         58, y + 46);
     }
   });

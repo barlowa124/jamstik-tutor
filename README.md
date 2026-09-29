@@ -204,7 +204,8 @@ proprietary sysex/BLE channel and are intentionally not reimplemented.
 
 Waveform (time domain), spectrum, scrolling spectrogram, the wavetable
 frames the synth uses, a pitch-class chromagram plus its scrolling
-history, a level-and-tone readout, a note waterfall, and a staff view.
+history, a periodicity (autocorrelation) view, a level-and-tone
+readout, a note waterfall, and a staff view.
 
 The spectrum runs a true log-frequency axis across the guitar band
 (60Hz to 4kHz) with a semitone grid, octave labels, and the six open
@@ -214,7 +215,9 @@ color, so you can watch a note's overtone stack land on real peaks. A
 decaying peak-hold trace rides the bars, and the top right names the
 dominant peak as nearest note plus frequency and cents off (the FFT is
 8192 bins deep and peak frequency is refined by parabolic
-interpolation, so cents mean something down on the low E).
+interpolation, so cents mean something down on the low E). Each source
+also lists its `heard` notes: spectral peaks found in the audio and
+named as pitches, independent of whatever MIDI says is held.
 
 The chromagram folds all FFT energy into the 12 pitch classes, one bar
 each, so chord quality reads directly out of the audio; a slow energy
@@ -242,10 +245,14 @@ flux, so pick attacks read off the audio itself; the newest onset
 gets its attack time in ms, and a run of 4+ onsets yields a tempo
 estimate. The meters row also reports the ACF estimate with its
 confidence, zero-crossing rate, spectral flatness (tonal comb vs
-noise), and crest factor. The spectrogram runs the same
-log-frequency axis with note gridlines. The waveform marks the ACF
+noise), crest factor, and spectral rolloff. The spectrogram runs the
+same log-frequency axis with note gridlines. The waveform marks the ACF
 estimate's measured period as ticks along the top edge (`T 3.0ms`),
-so the estimator's answer is checkable against the raw repeat rate.
+so the estimator's answer is checkable against the raw repeat rate,
+and the periodicity cell draws the normalized autocorrelation curve
+itself on a log-frequency axis with the chosen lag marked: a confident
+tone is a tall spike, a chord widens it into multiple bumps, noise is
+flat.
 
 Tuner mode reads MIDI pitch bend for held Jamstik notes. With audio
 input enabled and nothing held, the same needle becomes a chromatic
