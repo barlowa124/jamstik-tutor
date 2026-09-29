@@ -573,6 +573,16 @@ function init() {
   buildSoundsPanel();
   setMode('free');
 
+  // Watchdog: any synth voice not backed by a held note and older than
+  // the grace period is orphaned (dropped off, stale-off rejection, a
+  // mode edge) and would ring at sustain level forever — cull it and
+  // say so in the log so the leak path stays diagnosable.
+  setInterval(() => {
+    if (!app.synth.voices?.size) return;
+    for (const k of app.synth.cullOrphans(app.held))
+      logMidi(`culled stuck voice ${k}`);
+  }, 2000);
+
   $('connect').onclick = connectSource;
   $('flip').onchange = () => { if (app.source instanceof MidiEngine) app.source.flip = $('flip').checked; };
   $('chan-mode').onchange = () => {

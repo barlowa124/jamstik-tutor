@@ -207,7 +207,7 @@ export class SynthEngine {
     eg.gain.value = 1;
     g.connect(eg);
     eg.connect(this.master);
-    this.voices.set(key, { oscs, gain: g, expr: eg, midi, pMidi, str, preset: name, peak });
+    this.voices.set(key, { oscs, gain: g, expr: eg, midi, pMidi, str, preset: name, peak, born: Date.now() });
   }
 
   noteOff(key, midi = null, release = null) {
@@ -242,6 +242,22 @@ export class SynthEngine {
 
   bendAll(semis) { for (const key of this.voices.keys()) this.bend(key, semis); }
   allOff() { for (const s of [...this.voices.keys()]) this.noteOff(s, null, 0.05); }
+
+  // Voice watchdog: every legitimately-ringing voice is either a held
+  // note (key present in `alive`) or a short playback note whose
+  // scheduled off is < ~6s out. Anything else is orphaned — a dropped
+  // note-off, a stale-off rejection, a mode edge — and rings at
+  // sustain level forever. Cull orphans past the grace period.
+  cullOrphans(alive, graceMs = 8000) {
+    const now = Date.now(), culled = [];
+    for (const [key, v] of this.voices) {
+      if (!alive.has(key) && now - v.born > graceMs) {
+        this.noteOff(key, null, 0.4);
+        culled.push(key);
+      }
+    }
+    return culled;
+  }
 }
 
 // Real guitar audio in (Jamstik analog/USB out -> interface). Visualized
