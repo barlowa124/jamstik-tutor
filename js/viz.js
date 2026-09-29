@@ -17,13 +17,12 @@ function prep(canvas) {
 }
 
 // Time-domain trace. `sources` = [{analyser, color, label}]
-export function drawScope(canvas, sources) {
+export function drawScope(canvas, sources, sr = 44100) {
   const { g, w, h } = prep(canvas);
   g.clearRect(0, 0, w, h);
-  const buf = new Float32Array(2048);
   for (const src of sources) {
     if (!src.analyser) continue;
-    src.analyser.getFloatTimeDomainData(buf);
+    const buf = timeBuf(src.analyser);
     g.beginPath();
     g.strokeStyle = src.color;
     g.lineWidth = 1.4;
@@ -36,6 +35,26 @@ export function drawScope(canvas, sources) {
     g.fillStyle = src.color;
     g.font = '10px ui-monospace, monospace';
     g.fillText(src.label, 8 + sources.indexOf(src) * 60, 14);
+
+    // ACF period ticks: the measured fundamental period marked along
+    // the top edge, so the estimator's answer is visible against the
+    // raw repeat rate of the waveform
+    const ac = acfPitch(src.analyser, sr);
+    if (ac.f > 0 && ac.conf > ACF_CONF) {
+      const stepPx = (sr / ac.f) / buf.length * w;
+      if (stepPx > 3) {
+        g.strokeStyle = src.color + '66';
+        g.beginPath();
+        for (let x = stepPx / 2; x < w; x += stepPx) {
+          g.moveTo(x, 4); g.lineTo(x, 10);
+        }
+        g.stroke();
+        g.fillStyle = src.color;
+        g.font = '8px ui-monospace, monospace';
+        const txt = `T ${(1000 / ac.f).toFixed(2)}ms`;
+        g.fillText(txt, w - g.measureText(txt).width - 6, 12);
+      }
+    }
   }
 }
 
@@ -241,27 +260,71 @@ export function drawSpectrum(canvas, sources, held, sr = 44100) {
 // Chromagram: FFT energy folded into 12 pitch-class bars. Two source
 // halves side by side (synth left, input right). Held pitch classes get
 // a bright tick above their bar.
+// Fold FFT energy into 12 pitch classes (linear amplitude summed
+// across every octave). Shared by the chromagram, its history cell,
+// and the key estimator.
+function chromaEnergy(an, sr) {
+  const b = freqBuf(an), hz = sr / an.fftSize;
+  const e = new Float32Array(12);
+  for (let m = 24; m <= 96; m++) {
+    const f = 440 * Math.pow(2, (m - 69) / 12);
+    if (f > FMAX * 1.5) break;
+    e[((m % 12) + 12) % 12] += Math.pow(10, (b[Math.round(f / hz)] ?? -140) / 20);
+  }
+  return e;
+}
+
+// Krumhansl-Schmuckler key profiles; the estimate is the best Pearson
+// correlation over all 24 tonic/mode rotations of a slow chroma EMA.
+const KS_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+const KS_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+const KEY_DECAY = 0.995; // per-frame accumulator decay (~3s half-life at 60fps)
+const _keyAcc = new WeakMap(); // src -> {acc: Float32Array, key}
+
+function estKey(acc) {
+  const m = acc.reduce((a, x) => a + x, 0) / 12;
+  if (m < 1e-4) return null;
+  let best = null;
+  for (const [mode, prof] of [['maj', KS_MAJOR], ['min', KS_MINOR]]) {
+    const pm = prof.reduce((a, x) => a + x, 0) / 12;
+    let db = 0;
+    for (let i = 0; i < 12; i++) db += (prof[i] - pm) ** 2;
+    for (let t = 0; t < 12; t++) {
+      let n = 0, da = 0;
+      for (let i = 0; i < 12; i++) {
+        const x = acc[(i + t) % 12] - m, y = prof[i] - pm;
+        n += x * y; da += x * x;
+      }
+      const r = n / Math.sqrt(da * db || 1e-12);
+      if (!best || r > best.r) best = { r, tonic: t, mode };
+    }
+  }
+  return best;
+}
+
+const PC_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+// Chromagram: FFT energy folded into 12 pitch-class bars. Two source
+// halves side by side (synth left, input right). A slow energy
+// accumulator feeds a Krumhansl-Schmuckler key estimate per source.
 export function drawChroma(canvas, sources, sr = 44100) {
   const { g, w, h } = prep(canvas);
   g.clearRect(0, 0, w, h);
-  const PC = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const PC = PC_NAMES;
   const half = w / sources.length;
   sources.forEach((src, si) => {
     if (!src.analyser) return;
-    const b = freqBuf(src.analyser), hz = sr / src.analyser.fftSize;
-    const energy = new Float32Array(12);
-    for (let m = 24; m <= 96; m++) {
-      const f = 440 * Math.pow(2, (m - 69) / 12);
-      if (f > FMAX * 1.5) break;
-      const bi = Math.round(f / hz);
-      const amp = Math.pow(10, (b[bi] ?? -140) / 20); // dB -> linear
-      energy[((m % 12) + 12) % 12] += amp;
-    }
+    const energy = chromaEnergy(src.analyser, sr);
+    let st = _keyAcc.get(src);
+    if (!st) { st = { acc: new Float32Array(12), key: null }; _keyAcc.set(src, st); }
+    for (let i = 0; i < 12; i++) st.acc[i] = st.acc[i] * KEY_DECAY + energy[i];
+    st.key = estKey(st.acc);
     const max = Math.max(...energy, 1e-6);
     const bw = (half - 10) / 12, x0 = si * half + 5;
     g.fillStyle = src.color;
     g.font = '9px ui-monospace, monospace';
-    g.fillText(src.label, x0, 12);
+    const key = st.key && st.key.r > 0.5 ? ` · est. ${PC[st.key.tonic]}${st.key.mode === 'min' ? 'm' : ''}` : '';
+    g.fillText(src.label + key, x0, 12);
     energy.forEach((e, pc) => {
       const v = Math.sqrt(e / max); // sqrt so quiet PCs stay visible
       const bh = v * (h - 30);
@@ -271,6 +334,60 @@ export function drawChroma(canvas, sources, sr = 44100) {
       g.fillText(PC[pc], x0 + pc * bw + bw / 2 - 4, h - 4);
     });
   });
+}
+
+// Chroma history: each source's pitch-class energy scrolled left as a
+// 12-row heatmap — chord changes and progressions read as bands moving
+// across the grid. Same scrolling-offscreen pattern as Spectrogram.
+export class ChromaHistory {
+  constructor(canvas) {
+    this.cv = canvas;
+    this.off = document.createElement('canvas');
+  }
+
+  draw(sources, sr = 44100) {
+    const { g, w, h } = prep(this.cv);
+    if (this.off.width !== this.cv.width || this.off.height !== this.cv.height) {
+      this.off.width = this.cv.width;
+      this.off.height = this.cv.height;
+      this.og = this.off.getContext('2d');
+      this.og.fillStyle = '#0b1120';
+      this.og.fillRect(0, 0, this.cv.width, this.cv.height);
+    }
+    const og = this.og;
+    og.drawImage(this.off, -2, 0);
+    og.fillStyle = '#0b1120';
+    og.fillRect(this.cv.width - 2, 0, 2, this.cv.height);
+    const bands = sources.filter(s => s.analyser);
+    const bandH = this.cv.height / Math.max(1, bands.length);
+    bands.forEach((src, bi) => {
+      const e = chromaEnergy(src.analyser, sr);
+      const max = Math.max(...e, 1e-6);
+      const rowH = bandH / 12;
+      for (let pc = 0; pc < 12; pc++) {
+        const v = Math.sqrt(e[pc] / max);
+        og.fillStyle = `hsl(${190 + v * 80}, ${40 + v * 60}%, ${8 + v * 55}%)`;
+        og.fillRect(this.cv.width - 2, bi * bandH + pc * rowH, 2, Math.ceil(rowH));
+      }
+    });
+    g.drawImage(this.off, 0, 0, w, h);
+    // PC labels + band separators drawn over the scrolled image
+    const rowHpx = h / 12 / Math.max(1, bands.length);
+    bands.forEach((src, bi) => {
+      const y0 = h / Math.max(1, bands.length) * bi;
+      g.fillStyle = src.color;
+      g.font = '8px ui-monospace, monospace';
+      g.fillText(src.label, 4, y0 + 9);
+      for (let pc = 0; pc < 12; pc++) {
+        g.fillStyle = '#334155';
+        g.fillText(PC_NAMES[pc], 4, y0 + pc * rowHpx + rowHpx - 2);
+      }
+      if (bi > 0) {
+        g.strokeStyle = '#1e293b';
+        g.beginPath(); g.moveTo(0, y0); g.lineTo(w, y0); g.stroke();
+      }
+    });
+  }
 }
 
 // Level + tone readout per source: RMS level bar and text readouts for
@@ -458,7 +575,9 @@ export function drawPitchTrack(canvas, sources, sr = 44100) {
       }
       const span = (pts[pts.length - 1].t - pts[0].t) / 1000;
       const hz2 = cross / 2 / span;
-      if (cross >= 4 && depth > 0.04 && hz2 > 1 && hz2 < 12) {
+      // depth cap: real vibrato is ≤~2 semitones; deeper excursions mean
+      // the estimator is hopping between chord tones, not oscillating
+      if (cross >= 4 && depth > 0.04 && depth < 3 && hz2 > 1 && hz2 < 12) {
         g.fillStyle = src.color;
         g.font = '9px ui-monospace, monospace';
         const t2 = `vib ${hz2.toFixed(1)}Hz ±${depth.toFixed(2)}st`;

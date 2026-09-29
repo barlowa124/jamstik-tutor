@@ -203,8 +203,8 @@ proprietary sysex/BLE channel and are intentionally not reimplemented.
 ## Visualizations
 
 Waveform (time domain), spectrum, scrolling spectrogram, the wavetable
-frames the synth uses, a pitch-class chromagram, a level-and-tone
-readout, a note waterfall, and a staff view.
+frames the synth uses, a pitch-class chromagram plus its scrolling
+history, a level-and-tone readout, a note waterfall, and a staff view.
 
 The spectrum runs a true log-frequency axis across the guitar band
 (60Hz to 4kHz) with a semitone grid, octave labels, and the six open
@@ -217,7 +217,11 @@ dominant peak as nearest note plus frequency and cents off (the FFT is
 interpolation, so cents mean something down on the low E).
 
 The chromagram folds all FFT energy into the 12 pitch classes, one bar
-each, so chord quality reads directly out of the audio. Level and tone
+each, so chord quality reads directly out of the audio; a slow energy
+accumulator feeds a Krumhansl-Schmuckler key estimate next to each
+source label (`est. Am`). The harmony-trail cell scrolls the same
+folded energy as a 12-row heatmap per source, so chord changes and
+progressions read as bands moving left. Level and tone
 gives each source an RMS bar plus numbers: level in dB, spectral
 centroid (brightness) in Hz, and the same dominant-peak note/cents
 readout as the spectrum. Pitch track scrolls the dominant peak across
@@ -239,7 +243,9 @@ gets its attack time in ms, and a run of 4+ onsets yields a tempo
 estimate. The meters row also reports the ACF estimate with its
 confidence, zero-crossing rate, spectral flatness (tonal comb vs
 noise), and crest factor. The spectrogram runs the same
-log-frequency axis with note gridlines.
+log-frequency axis with note gridlines. The waveform marks the ACF
+estimate's measured period as ticks along the top edge (`T 3.0ms`),
+so the estimator's answer is checkable against the raw repeat rate.
 
 Tuner mode reads MIDI pitch bend for held Jamstik notes. With audio
 input enabled and nothing held, the same needle becomes a chromatic
