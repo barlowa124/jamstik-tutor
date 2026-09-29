@@ -65,8 +65,7 @@ export class FreePlay {
         for (const [s, f] of Object.entries(shape)) {
           if (f == null) continue;
           const str = +s, midi = OPEN_MIDI[str] + f;
-          setTimeout(() => this.app.synth.noteOn(`bk${str}`, midi, 72, str), d);
-          setTimeout(() => this.app.synth.noteOff(`bk${str}`, midi), d + barMs - 120);
+          setTimeout(() => this.app.synth.noteOn(`bk${str}`, midi, 72, str, barMs - 120), d);
           d += 22;
         }
       }
@@ -203,8 +202,7 @@ export class ChordTrainer {
       const midi = OPEN_MIDI[s] + f;
       // hp keys: audition voices must not clobber a real held note on
       // the same string (s* keys belong to played notes).
-      setTimeout(() => this.app.synth.noteOn(`hp${s}`, midi, 92, +s), delay);
-      setTimeout(() => this.app.synth.noteOff(`hp${s}`, midi), delay + 1800);
+      setTimeout(() => this.app.synth.noteOn(`hp${s}`, midi, 92, +s, 1800), delay);
     }
   }
 
@@ -327,8 +325,7 @@ export class ScaleDrill {
     const run = scaleRun(this.rootPc(), this.scaleSel.value, 0, 6);
     run.forEach((p, i) => {
       const midi = OPEN_MIDI[p.string] + p.fret;
-      setTimeout(() => this.app.synth.noteOn('sc', midi, 84, p.string), i * 220);
-      setTimeout(() => this.app.synth.noteOff('sc', midi), i * 220 + 190);
+      setTimeout(() => this.app.synth.noteOn('sc', midi, 84, p.string, 190), i * 220);
     });
   }
 
@@ -1051,8 +1048,7 @@ export class Quiz {
     if (!t) return;
     this.app.synth.ensure();
     const play = (key, midi, at, dur) => {
-      setTimeout(() => this.app.synth.noteOn(key, midi, 92, null), at);
-      setTimeout(() => this.app.synth.noteOff(key, midi), at + dur);
+      setTimeout(() => this.app.synth.noteOn(key, midi, 92, null, dur), at);
     };
     if (t.kind === 'ear') {
       play('ear', t.base, 0, 800);
@@ -1390,8 +1386,7 @@ export class RiffDrill {
     const gap = 30000 / bpm; // eighth-note steps at the header tempo
     steps.forEach(([str, fret], i) => {
       const midi = OPEN_MIDI[str] + fret;
-      setTimeout(() => this.app.synth.noteOn(`rf${i}`, midi, 90, str), i * gap);
-      setTimeout(() => this.app.synth.noteOff(`rf${i}`, midi), i * gap + gap * 0.9);
+      setTimeout(() => this.app.synth.noteOn(`rf${i}`, midi, 90, str, gap * 0.9), i * gap);
     });
   }
 

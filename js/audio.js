@@ -173,7 +173,10 @@ export class SynthEngine {
     return buf;
   }
 
-  noteOn(key, midi, vel = 100, str = null) {
+  // durMs: playback callers pass a duration and the synth owns the
+  // release — releaseAt lives on the voice itself, so "is this note
+  // going to end" is an observable property, not a guess.
+  noteOn(key, midi, vel = 100, str = null, durMs = null) {
     if (!this.ensure()) return;
     this.noteOff(key, null, 0.03);
     const preset = this.presetFor(str);
@@ -207,13 +210,16 @@ export class SynthEngine {
     eg.gain.value = 1;
     g.connect(eg);
     eg.connect(this.master);
-    this.voices.set(key, { oscs, gain: g, expr: eg, midi, pMidi, str, preset: name, peak, born: Date.now() });
+    const offTimer = durMs ? setTimeout(() => this.noteOff(key, midi), durMs) : null;
+    this.voices.set(key, { oscs, gain: g, expr: eg, midi, pMidi, str, preset: name, peak,
+      born: Date.now(), releaseAt: durMs ? Date.now() + durMs : null, offTimer });
   }
 
   noteOff(key, midi = null, release = null) {
     const v = this.voices.get(key);
     if (!v) return;
-    if (midi !== null && v.midi !== midi) return; // stale off
+    if (midi !== null && v.midi !== midi) return; // stale off — leave the new voice's timer alone
+    clearTimeout(v.offTimer);
     const rel = release ?? PRESETS[v.preset].env.rel;
     const t = this.ctx.currentTime;
     v.gain.gain.cancelScheduledValues(t);
@@ -243,18 +249,20 @@ export class SynthEngine {
   bendAll(semis) { for (const key of this.voices.keys()) this.bend(key, semis); }
   allOff() { for (const s of [...this.voices.keys()]) this.noteOff(s, null, 0.05); }
 
-  // Voice watchdog: every legitimately-ringing voice is either a held
-  // note (key present in `alive`) or a short playback note whose
-  // scheduled off is < ~6s out. Anything else is orphaned — a dropped
-  // note-off, a stale-off rejection, a mode edge — and rings at
-  // sustain level forever. Cull orphans past the grace period.
-  cullOrphans(alive, graceMs = 8000) {
+  // Voice watchdog — observation-based, not time-based. A voice is
+  // allowed to ring iff there is an observable reason it will end:
+  // its key is held (`alive`), or the voice itself carries a pending
+  // release (releaseAt set at noteOn, timer owned by the synth). A
+  // release more than ~1.5s overdue means its timer misfired; a voice
+  // with neither is orphaned outright. Both die on the next sweep.
+  cullOrphans(alive) {
     const now = Date.now(), culled = [];
     for (const [key, v] of this.voices) {
-      if (!alive.has(key) && now - v.born > graceMs) {
-        this.noteOff(key, null, 0.4);
-        culled.push(key);
-      }
+      if (alive.has(key)) continue;
+      if (now - v.born < 300) continue; // never sweep a just-born voice
+      if (v.releaseAt && v.releaseAt + 1500 > now) continue;
+      this.noteOff(key, null, 0.4);
+      culled.push(key);
     }
     return culled;
   }
