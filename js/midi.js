@@ -54,7 +54,13 @@ export class MidiEngine {
       ? inputs.find(i => i.id === inputId)
       : inputs.find(i => /jamstik/i.test(i.name || '')) || inputs[0];
     this.setInput(pick);
-    this.access.onstatechange = () => this.h.onInputsChanged?.(this.listInputs());
+    this.access.onstatechange = e => {
+      this.h.onInputsChanged?.(this.listInputs());
+      // Cable pulled mid-note: pending note-offs never arrive, so
+      // without this the held voices ring at sustain level forever.
+      if (e.port === this.input && e.port.state === 'disconnected')
+        this.disconnect();
+    };
     return true;
   }
 
@@ -116,6 +122,7 @@ export class MidiEngine {
   disconnect() {
     if (this.input) this.input.onmidimessage = null;
     this.input = null;
+    this.h.onAllOff?.(); // release held notes; their offs are gone with the port
     this.h.onStateChange?.('disconnected');
   }
 }
@@ -129,7 +136,10 @@ export class VirtualJamstik {
     this.name = 'Virtual Jamstik (demo)';
   }
   connect() { this.h.onStateChange?.(`connected: ${this.name}`); }
-  disconnect() { this.h.onStateChange?.('disconnected'); }
+  disconnect() {
+    this.h.onAllOff?.();
+    this.h.onStateChange?.('disconnected');
+  }
 
   noteOn(str, midi, vel = 96) { this.h.onNoteOn?.(`s${str}`, str, midi, vel, performance.now()); }
   noteOff(str, midi) { this.h.onNoteOff?.(`s${str}`, str, midi, performance.now()); }
@@ -241,8 +251,12 @@ export class MidiPlayer {
   }
 
   stop() {
+    const had = this.timers.length > 0;
     this.timers.forEach(clearTimeout);
     this.timers = [];
+    // Stopping mid-note orphans voices (their offs are in the timers
+    // just cleared), so anything still sounding gets released.
+    if (had) this.h.onAllOff?.();
   }
 }
 

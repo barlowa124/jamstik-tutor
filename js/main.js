@@ -214,6 +214,7 @@ async function connectSource() {
   const sel = $('device');
   app.synth.ensure();
   app.source?.disconnect?.();
+  handlers.onAllOff(); // no note-offs survive a source swap; don't leave voices ringing
   if (sel.value === 'virtual') {
     app.source = new VirtualJamstik(handlers);
     app.source.connect();
