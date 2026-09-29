@@ -177,6 +177,38 @@ export class VirtualJamstik {
   }
 }
 
+// Forwards the app's effective note stream to a Web MIDI output port —
+// e.g. a macOS IAC bus feeding a DAW. Channels map str-1, matching the
+// SMF convention, so a DAW in per-channel (MPE) mode sees the same
+// per-string articulation the synth plays: per-channel note on/off,
+// 14-bit pitch bend over +/-2 semitones, and CC11 expression.
+export class MidiOut {
+  constructor(port) { this.port = port; }
+  static ch(str) { return str == null ? 0 : Math.max(0, Math.min(15, str - 1)); }
+
+  noteOn(str, midi, vel) {
+    this.port.send([0x90 | MidiOut.ch(str), midi & 0x7f, vel & 0x7f]);
+  }
+  noteOff(str, midi, vel = 64) {
+    this.port.send([0x80 | MidiOut.ch(str), midi & 0x7f, vel & 0x7f]);
+  }
+  bend(str, semis) {
+    const v = Math.max(0, Math.min(16383, Math.round(8192 + (semis / 2) * 8192)));
+    this.port.send([0xe0 | MidiOut.ch(str), v & 0x7f, (v >> 7) & 0x7f]);
+  }
+  // String-scoped CC11 goes on that channel; a channel-wide event
+  // repeats on all six string channels, mirroring the synth's
+  // 'apply to everything ringing' semantics.
+  expr(str, amp) {
+    const v = Math.round(Math.max(0, Math.min(1, amp)) * 127);
+    if (str == null) for (let s = 1; s <= 6; s++) this.port.send([0xb0 | (s - 1), 11, v]);
+    else this.port.send([0xb0 | MidiOut.ch(str), 11, v]);
+  }
+  allOff() {
+    for (let c = 0; c < 6; c++) this.port.send([0xb0 | c, 123, 0]);
+  }
+}
+
 // Records note events and exports a Standard MIDI File (format 0,
 // 480 PPQ, 120 BPM) for dropping into any DAW. `str` is the real
 // string (1-6) or null when the device did not name one, so playback

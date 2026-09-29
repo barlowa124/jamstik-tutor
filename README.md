@@ -181,6 +181,18 @@ playback-side surface of the Jamstik Creator app:
   `open .mid` imports any Standard MIDI File (formats 0/1, PPQ division,
   tempo-mapped, running status). A multi-channel file maps channels 1-6
   to strings. A single-channel file plays through the inferred path.
+- **MIDI out**: the `out` select lists Web MIDI output ports and mirrors
+  everything the app sounds (played notes, virtual device, mode
+  playback, recorded takes) to it live, including note on/off,
+  per-string pitch bend at the +/-2 wheel convention, and per-string
+  CC11 decay, each on the channel matching that string (str 1-6 ->
+  ch 1-6). That is the per-channel stream a DAW reads as MPE-style
+  articulation. On macOS, enable the IAC bus in *Audio MIDI Setup* and
+  it appears in the list. Point Bitwig, Ableton, Logic, or REAPER at
+  the same bus. Route the DAW's audio back through a loopback device
+  (BlackHole) into `enable audio in` and every analysis cell measures
+  what the instrument rendered. Switching ports mid-hold sends
+  all-notes-off on the old port so nothing rings orphaned in the DAW.
 
 Settings persist in `localStorage`: tuning (including custom), transpose,
 velocity curve, FX levels, preset splits, channel mode, bend range, and

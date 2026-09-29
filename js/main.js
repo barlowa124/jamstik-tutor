@@ -1,7 +1,7 @@
 // App wiring: state, mode dispatch, render loop, device management.
 
 import { OPEN_MIDI, midiName, inferString, setTuning, setTuningValues, TUNINGS, currentTuningName, STRING_NAMES } from './theory.js';
-import { MidiEngine, VirtualJamstik, MidiRecorder, MidiPlayer, parseSmf } from './midi.js';
+import { MidiEngine, VirtualJamstik, MidiRecorder, MidiPlayer, MidiOut, parseSmf } from './midi.js';
 import { SynthEngine, RealInput, Metronome, SessionRecorder, PRESETS, PRESET_CATS, VELOCITY_CURVES } from './audio.js';
 import { Fretboard } from './fretboard.js';
 import { drawScope, drawSpectrum, drawChroma, drawMeters, drawPitchTrack, drawHarmonics, drawEnvelope, drawWavetable, drawWaterfall, drawStaff, drawStrings, Spectrogram, ChromaHistory, HeardWaterfall, drawPeriodicity } from './viz.js';
@@ -124,6 +124,7 @@ const handlers = {
     pushExpr(str, 1);
     app.synth.noteOn(key, midi, vel, str);
     app.fretboard.active.set(str, { midi, bend: 0, amp: 1 });
+    app.midiOut?.noteOn(str, midi, vel);
     app.mode?.onNoteOn?.(str, midi, vel);
     app.mode?.onNotesChange?.();
     logMidi(`on  s${str}${inferred ? '?' : ''} ${midiName(midi)} v${vel}`);
@@ -153,6 +154,7 @@ const handlers = {
     app.midiRec?.add(false, n.inferred ? null : n.str, n.midi, 64, n.rawMidi);
     pushExpr(n.str, 0);
     app.synth.noteOff(k, n.midi); // stored pitch -> the guard always passes
+    app.midiOut?.noteOff(n.str, n.midi);
     app.mode?.onNoteOff?.(n.str ?? str, n.midi);
     app.mode?.onNotesChange?.();
     logMidi(`off s${n.str} ${midiName(n.midi)}`);
@@ -164,12 +166,14 @@ const handlers = {
     app.fretboard.active.clear();
     for (let s = 1; s <= 6; s++) pushExpr(s, 0);
     app.synth.allOff();
+    app.midiOut?.allOff();
     app.mode?.onNotesChange?.();
     logMidi('all notes off');
   },
   onPitchBend(str, semis) {
     if (!Number.isFinite(semis)) return;
     app.midiRec?.bend(str, semis);
+    app.midiOut?.bend(str, semis);
     if (str == null) {
       app.synth.bendAll(semis);
       for (const n of app.held.values()) n.bend = semis;
@@ -193,6 +197,7 @@ const handlers = {
     if (!Number.isFinite(v)) return;
     app.exprCcSeen = true;
     app.midiRec?.expr(str, v);
+    app.midiOut?.expr(str, v);
     if (str != null) {
       pushExpr(str, v);
       const n = app.held.get(`s${str}`);
@@ -207,7 +212,7 @@ const handlers = {
     app.mode?.onExpression?.(str, v);
   },
   onStateChange(text) { $('status').textContent = text; },
-  onInputsChanged(inputs) { fillDeviceList(inputs); },
+  onInputsChanged(inputs) { fillDeviceList(inputs); fillOutputList(); },
 };
 
 function logMidi(text) {
@@ -233,6 +238,8 @@ async function connectSource() {
     eng.chanMode = $('chan-mode').value;
     app.source = eng;
     const ok = await eng.connect(sel.value === 'auto' ? null : sel.value);
+    midiAccess = eng.access; // reuse the granted access for outputs too
+    fillOutputList();
     if (ok) fillDeviceList(eng.listInputs());
     else fillDeviceList([]);
   }
@@ -246,6 +253,45 @@ function fillDeviceList(inputs) {
   for (const i of inputs) sel.append(new Option(i.name, i.id));
   if (inputs.length) sel.prepend(new Option('auto-detect (Jamstik)', 'auto'));
   sel.value = [...sel.options].some(o => o.value === cur) ? cur : sel.options[0].value;
+}
+
+// ── MIDI output ───────────────────────────────────────────────────────
+// Everything the handlers forward also goes to the selected output
+// port — a virtual bus like macOS IAC feeds it to a DAW. Access is
+// requested lazily on first selection (or reused from the input
+// engine) so virtual-mode sessions don't get a permission prompt for a
+// port they never asked for.
+let midiAccess = null;
+async function ensureMidiAccess() {
+  midiAccess ??= await navigator.requestMIDIAccess({ sysex: false });
+  return midiAccess;
+}
+
+function fillOutputList() {
+  const sel = $('midi-out');
+  const cur = sel.value;
+  sel.innerHTML = '';
+  sel.append(new Option('off', ''));
+  for (const o of (midiAccess ? [...midiAccess.outputs.values()] : []))
+    sel.append(new Option(o.name, o.id));
+  sel.value = [...sel.options].some(o => o.value === cur) ? cur : '';
+}
+
+async function selectMidiOut() {
+  const sel = $('midi-out');
+  app.midiOut?.allOff(); // a port swap mid-hold would orphan DAW voices
+  app.midiOut = null;
+  if (!sel.value) return;
+  try {
+    const access = await ensureMidiAccess();
+    const port = [...access.outputs.values()].find(o => o.id === sel.value);
+    if (!port) { sel.value = ''; return; }
+    app.midiOut = new MidiOut(port);
+    logMidi(`midi out -> ${port.name}`);
+  } catch (e) {
+    sel.value = '';
+    logMidi('MIDI out: permission denied');
+  }
 }
 
 // ── Modes ───────────────────────────────────────────────────────────────
@@ -603,6 +649,8 @@ function init() {
   }, 1000);
 
   $('connect').onclick = connectSource;
+  $('midi-out').onchange = selectMidiOut;
+  fillOutputList();
   $('flip').onchange = () => { if (app.source instanceof MidiEngine) app.source.flip = $('flip').checked; };
   $('chan-mode').onchange = () => {
     if (app.source instanceof MidiEngine) {
@@ -677,7 +725,7 @@ function init() {
   // Debug/test hook: inspect app state and inject events from devtools,
   // e.g. __jt.handlers.onNoteOn('n64', null, 64, 100) simulates a
   // single-channel (mono) device sending middle C.
-  window.__jt = { app, handlers };
+  window.__jt = { app, handlers, MidiOut };
 }
 
 init();
