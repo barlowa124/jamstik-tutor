@@ -1,7 +1,7 @@
 // Visualization canvases: oscilloscope, spectrum bars, scrolling
 // spectrogram, and the wavetable frame display.
 
-import { waveFrame, PRESETS } from './audio.js';
+import { engineFrame, PRESETS } from './audio.js';
 import { midiName } from './theory.js';
 
 function prep(canvas) {
@@ -970,8 +970,8 @@ export function drawWavetable(canvas, engine) {
   const rows = used.slice(0, 6);
   const fh = h / rows.length;
   rows.forEach((name, row) => {
-    const { real, imag } = PRESETS[name].wave({});
-    const wave = waveFrame(real, imag);
+    const spec = PRESETS[name];
+    const wave = engineFrame(spec);
     const color = colors[row % colors.length];
     g.beginPath();
     g.strokeStyle = color;
@@ -984,7 +984,7 @@ export function drawWavetable(canvas, engine) {
     g.stroke();
     g.fillStyle = color;
     g.font = '9px ui-monospace, monospace';
-    g.fillText(name, 12, row * fh + 11);
+    g.fillText(`${name} · ${spec.engine || 'wave'}`, 12, row * fh + 11);
   });
 }
 

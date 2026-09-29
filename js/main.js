@@ -58,6 +58,7 @@ function saveSettings() {
       flip: $('flip').checked,
       bend: $('bend-range').value,
       bpm: $('bpm').value,
+      metroKit: app.synth.metroKit,
     }));
   } catch { /* storage unavailable */ }
 }
@@ -69,6 +70,7 @@ function restoreSettings() {
   if (s.flip != null) $('flip').checked = !!s.flip;
   if (s.bend != null) $('bend-range').value = s.bend;
   if (s.bpm != null) $('bpm').value = s.bpm;
+  if (s.metroKit != null) { app.synth.metroKit = !!s.metroKit; $('metro-kit').checked = !!s.metroKit; }
   if (s.chanMode != null) $('chan-mode').value = s.chanMode;
   if (Array.isArray(s.tuning)) setTuningValues(s.tuning);
   if (s.transpose != null) app.transpose = +s.transpose;
@@ -683,9 +685,16 @@ function init() {
   };
 
   const metro = { m: null };
+  $('metro-kit').onchange = () => { app.synth.metroKit = $('metro-kit').checked; saveSettings(); };
   $('metro').onclick = () => {
     app.synth.ensure();
-    if (!metro.m) metro.m = new Metronome(app.synth.ctx);
+    if (!metro.m) {
+      metro.m = new Metronome(app.synth.ctx);
+      // Kit mode swaps the beep for synthesized drum voices, through
+      // the same master so the analysers see them.
+      metro.m.voice = (strong, t) => app.synth.metroKit
+        ? (app.synth.drum(strong ? 'kick' : 'hat', t), true) : false;
+    }
     if (metro.m.running) {
       metro.m.stop();
       $('metro').textContent = '▶ metronome';

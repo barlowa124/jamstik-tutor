@@ -155,11 +155,22 @@ sweep. You can also click frets on the board directly.
 The sounds panel (right side, below the mode panel) covers the
 playback-side surface of the Jamstik Creator app:
 
-- **Presets**: 14 wavetable voices across guitar (steel, nylon,
-  electric clean, 12-string), bass (electric, synth, both transposed an
-  octave down), keys (piano-ish, drawbar organ, vibe), and synth
-  (saw/square leads, soft/brass pads, flute-ish). Each is a PeriodicWave
-  harmonic recipe plus its own envelope. Some stack detuned oscillators.
+- **Presets**: 20 voices across five synthesis engines, no samples.
+  Wavetable (steel, nylon, electric clean, 12-string, electric and
+  synth bass, piano-ish, drawbar organ, vibe, saw/square leads,
+  soft/brass pads, flute-ish) is a PeriodicWave harmonic recipe plus
+  envelope, some with stacked detuned oscillators. `modeled steel` and
+  `modeled nylon` are Karplus-Strong strings: a pick-filtered noise
+  burst ringing a delay loop, so decay is physical. Feedback sets the
+  length, a loop lowpass damps highs first, and bends retune the delay
+  line itself. `fm ep`, `fm bell`, and `fm bass` are 2-op FM voices
+  (ratio/index/mod-decay). `analog lead`, `analog bass`, and `filter
+  pad` are subtractive voices whose per-voice resonant lowpass gets a
+  cutoff envelope, a second filter on top of the global tone knob.
+  `drawbar + perc` adds a decaying sine at a drawbar
+  harmonic, the Hammond percussion signature. All engines honor the
+  same bend/expression/release machinery, and the wavetable cell draws
+  each engine's shape (carrier, loop decay, or raw osc) with its tag.
 - **Assignment**: pick string chips, then a preset, for splits (e.g.
   electric bass on 4-5-6 with saw lead on 1-2-3). Empty selection
   applies to all strings.
@@ -197,7 +208,11 @@ playback-side surface of the Jamstik Creator app:
 Settings persist in `localStorage`: tuning (including custom), transpose,
 velocity curve, FX levels, preset splits, channel mode, bend range, and
 metronome BPM all survive a reload. The `tap` button sets BPM from
-your taps (average of the last four, reset after a 2.5s pause).
+your taps (average of the last four, reset after a 2.5s pause). The
+`kit` checkbox swaps the metronome beep for synthesized drums: a
+pitch-drop kick on the downbeat and highpassed-noise hat elsewhere,
+plus a snare voice available to drills, all rendered through the FX
+chain so the analysis cells see the hits.
 
 Device-side settings the Jamstik app exposes (firmware flashing,
 hammer-on thresholds, pickup sensitivity calibration) go over its

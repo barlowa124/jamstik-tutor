@@ -1511,6 +1511,9 @@ export class RhythmDrill {
   start() {
     this.app.synth.ensure();
     this.metro = this.metro || new Metronome(this.app.synth.ctx);
+    if (!this.metro.voice) this.metro.voice = (strong, t) =>
+      this.app.synth.metroKit
+        ? (this.app.synth.drum(strong ? 'kick' : 'hat', t), true) : false;
     this.metro.bpm = +document.getElementById('bpm').value || 80;
     this.beatTimes = [];
     this.base = null;
