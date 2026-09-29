@@ -4,7 +4,7 @@ import { OPEN_MIDI, midiName, inferString, setTuning, setTuningValues, TUNINGS, 
 import { MidiEngine, VirtualJamstik, MidiRecorder, MidiPlayer, parseSmf } from './midi.js';
 import { SynthEngine, RealInput, Metronome, SessionRecorder, PRESETS, PRESET_CATS, VELOCITY_CURVES } from './audio.js';
 import { Fretboard } from './fretboard.js';
-import { drawScope, drawSpectrum, drawChroma, drawMeters, drawPitchTrack, drawHarmonics, drawEnvelope, drawWavetable, drawWaterfall, drawStaff, drawStrings, Spectrogram, ChromaHistory, drawPeriodicity } from './viz.js';
+import { drawScope, drawSpectrum, drawChroma, drawMeters, drawPitchTrack, drawHarmonics, drawEnvelope, drawWavetable, drawWaterfall, drawStaff, drawStrings, Spectrogram, ChromaHistory, HeardWaterfall, drawPeriodicity } from './viz.js';
 import { FreePlay, ChordTrainer, ScaleDrill, Tuner, Quiz, ChordChanges, RiffDrill, RhythmDrill } from './modes.js';
 
 const $ = id => document.getElementById(id);
@@ -545,8 +545,9 @@ function frame() {
   drawPitchTrack($('pitchtrack'), srcs, sr);
   drawHarmonics($('harmonics'), srcs, sr);
   drawEnvelope($('envelope'), srcs, sr);
-  spectro.g.draw(app.synth.analyser, sr);
+  spectro.g.draw(srcs, sr);
   spectro.ch?.draw(srcs, sr);
+  spectro.hw?.draw(srcs, sr);
   drawWaterfall($('waterfall'), app.history, app.held, performance.now());
   drawStaff($('staff'), [...app.held.values()].map(n => n.midi));
   drawStrings($('strings'), app.exprLanes, app.exprCcSeen, performance.now(),
@@ -573,6 +574,7 @@ function init() {
   app.fretboard = new Fretboard($('board'));
   spectro.g = new Spectrogram($('spectrogram'));
   spectro.ch = new ChromaHistory($('chroma-hist'));
+  spectro.hw = new HeardWaterfall($('heard'));
   drawWavetable($('wavetable'), app.synth);
   fillDeviceList([]);
   buildDemoPanel();

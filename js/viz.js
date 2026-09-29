@@ -488,6 +488,9 @@ export class ChromaHistory {
   }
 }
 
+// Per-source stability rings for the jitter/shimmer readout.
+const _stab = new WeakMap(); // src -> {fs, rs}
+
 // Level + tone readout per source: RMS level bar and text readouts for
 // RMS dB, spectral centroid (brightness), and the dominant peak's
 // nearest note with cents deviation.
@@ -557,18 +560,104 @@ export function drawMeters(canvas, sources, sr = 44100) {
         ` · zcr ${(zc / tb.length * 100).toFixed(1)}% · flat ${flat.toFixed(2)}` +
         ` · crest ${crest.toFixed(1)} · roll ${roll}`,
         58, y + 46);
+      // stability: jitter = mean cycle-to-cycle f0 deviation, shimmer =
+      // rms scatter — a steady tone reads jit ~0%, a wobbling one 1-3%
+      let stb = _stab.get(src);
+      if (!stb) { stb = { fs: [], rs: [] }; _stab.set(src, stb); }
+      stb.fs.push(ac.conf > ACF_CONF && ac.f > 0 ? ac.f : (p.db > -80 ? p.f : 0));
+      stb.rs.push(Math.sqrt(sum / tb.length));
+      if (stb.fs.length > 48) { stb.fs.shift(); stb.rs.shift(); }
+      if (stb.fs.length > 12) {
+        // jitter only means something on a sustained single pitch —
+        // restrict to consecutive estimates within a semitone so chord
+        // tone hops aren't read as instability
+        let jd = 0, jm = 0, nc = 0;
+        for (let i = 1; i < stb.fs.length; i++) {
+          const a = stb.fs[i - 1], c = stb.fs[i];
+          if (a > 0 && c > 0 && Math.abs(c - a) / a < 0.06) { jd += Math.abs(c - a); jm += c; nc++; }
+        }
+        const mr = stb.rs.reduce((a, x) => a + x, 0) / stb.rs.length;
+        const shim = mr > 1e-9 ? Math.sqrt(stb.rs.reduce((a, x) => a + (x - mr) ** 2, 0) / stb.rs.length) / mr : 0;
+        g.fillText(`jit ${nc > 6 ? (jd / (jm / nc) * 100).toFixed(1) + '%' : '--'} · shim ${(shim * 100).toFixed(0)}%`, 58, y + 58);
+      }
     }
   });
 }
 
 // Scrolling spectrogram: each frame shifts left, new column drawn at right.
+// Heard waterfall: findPeaks output plotted per frame as a scrolling
+// midi-grid — what the audio actually contained over the last ~10s,
+// the audio-side counterpart to the MIDI-derived note waterfall.
+// Polyphonic: every confident spectral peak leaves a mark.
+export class HeardWaterfall {
+  constructor(canvas) {
+    this.cv = canvas;
+    this.off = document.createElement('canvas');
+  }
+
+  draw(sources, sr = 44100) {
+    const { g, w, h } = prep(this.cv);
+    if (this.off.width !== this.cv.width || this.off.height !== this.cv.height) {
+      this.off.width = this.cv.width;
+      this.off.height = this.cv.height;
+      this.og = this.off.getContext('2d');
+      this.og.fillStyle = '#0b1120';
+      this.og.fillRect(0, 0, this.cv.width, this.cv.height);
+    }
+    const og = this.og;
+    og.drawImage(this.off, -2, 0);
+    og.fillStyle = '#0b1120';
+    og.fillRect(this.cv.width - 2, 0, 2, this.cv.height);
+    const bands = sources.filter(s => s.analyser);
+    const MLO = 36, MHI = 96;
+    const bandH = this.cv.height / Math.max(1, bands.length);
+    bands.forEach((src, bi) => {
+      for (const p of findPeaks(src.analyser, sr, 8)) {
+        const m = Math.round(69 + 12 * Math.log2(p.f / 440));
+        if (m < MLO || m > MHI) continue;
+        const y = bi * bandH + bandH - 1 - (m - MLO) / (MHI - MLO) * bandH;
+        const v = Math.max(0, Math.min(1, (p.db + 60) / 45));
+        og.fillStyle = `hsl(${190 + v * 80}, ${40 + v * 60}%, ${10 + v * 55}%)`;
+        og.fillRect(this.cv.width - 2, y - 1, 2, 2);
+      }
+    });
+    g.drawImage(this.off, 0, 0, w, h);
+    // per-band C-note grid + labels drawn over the scrolled image
+    const rowH = h / Math.max(1, bands.length);
+    bands.forEach((src, bi) => {
+      const y0 = bi * rowH;
+      for (let m = MLO; m <= MHI; m += 12) {
+        const y = y0 + rowH - (m - MLO) / (MHI - MLO) * rowH;
+        g.strokeStyle = '#1a2436';
+        g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+        g.fillStyle = '#475569';
+        g.font = '8px ui-monospace, monospace';
+        g.fillText(midiName(m), 3, y - 2);
+      }
+      for (const f of Object.values(OPEN_STRING_HZ)) {
+        const m = 69 + 12 * Math.log2(f / 440);
+        const y = y0 + rowH - (m - MLO) / (MHI - MLO) * rowH;
+        g.strokeStyle = '#24314655';
+        g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+      }
+      if (bi > 0) {
+        g.strokeStyle = '#1e293b';
+        g.beginPath(); g.moveTo(0, y0); g.lineTo(w, y0); g.stroke();
+      }
+      g.fillStyle = src.color;
+      g.font = '9px ui-monospace, monospace';
+      g.fillText(src.label, 4, y0 + 10);
+    });
+  }
+}
+
 export class Spectrogram {
   constructor(canvas) {
     this.cv = canvas;
     this.off = document.createElement('canvas');
   }
 
-  draw(analyser, sr = 44100) {
+  draw(sources, sr = 44100) {
     const { g, w, h } = prep(this.cv);
     if (this.off.width !== this.cv.width || this.off.height !== this.cv.height) {
       this.off.width = this.cv.width;
@@ -582,33 +671,46 @@ export class Spectrogram {
     og.drawImage(this.off, -2, 0);
     og.fillStyle = '#0b1120';
     og.fillRect(this.cv.width - 2, 0, 2, this.cv.height);
-    if (analyser) {
-      const b = freqBuf(analyser), hz = sr / analyser.fftSize;
-      const rows = this.cv.height;
+    const bands = sources.filter(s => s.analyser);
+    const bandH = this.cv.height / Math.max(1, bands.length);
+    bands.forEach((src, bi) => {
+      const b = freqBuf(src.analyser), hz = sr / src.analyser.fftSize;
+      const rows = Math.floor(bandH);
       for (let i = 0; i < rows; i++) {
-        // row i from bottom maps to log frequency in the guitar band
+        // row i from band bottom maps to log frequency in the guitar band
         const f = FMIN * Math.pow(FMAX / FMIN, i / rows);
-        const bi = Math.min(b.length - 1, Math.round(f / hz));
-        const v = Math.max(0, Math.min(1, (b[bi] + 100) / 70));
+        const bi2 = Math.min(b.length - 1, Math.round(f / hz));
+        const v = Math.max(0, Math.min(1, (b[bi2] + 100) / 70));
         og.fillStyle = `hsl(${190 + v * 80}, ${40 + v * 60}%, ${8 + v * 55}%)`;
-        og.fillRect(this.cv.width - 2, this.cv.height - 1 - i, 2, 1);
+        og.fillRect(this.cv.width - 2, bi * bandH + bandH - 1 - i, 2, 1);
       }
-    }
+    });
     g.drawImage(this.off, 0, 0, w, h);
-    // note gridlines drawn over the scrolled image each frame
-    for (let m = 0; m < 128; m++) {
-      const f = 440 * Math.pow(2, (m - 69) / 12);
-      if (f < FMIN || f > FMAX) continue;
-      const y = h - h * Math.log2(f / FMIN) / Math.log2(FMAX / FMIN);
-      const isC = ((m % 12) + 12) % 12 === 0;
-      g.strokeStyle = isC ? '#33415577' : '#1a243655';
-      g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
-      if (isC) {
-        g.fillStyle = '#64748b';
-        g.font = '8px ui-monospace, monospace';
-        g.fillText(midiName(m), 3, y - 2);
+    // note gridlines drawn per band over the scrolled image each frame
+    const rowH = h / Math.max(1, bands.length);
+    bands.forEach((src, bi) => {
+      const y0 = bi * rowH;
+      for (let m = 0; m < 128; m++) {
+        const f = 440 * Math.pow(2, (m - 69) / 12);
+        if (f < FMIN || f > FMAX) continue;
+        const y = y0 + rowH - rowH * Math.log2(f / FMIN) / Math.log2(FMAX / FMIN);
+        const isC = ((m % 12) + 12) % 12 === 0;
+        g.strokeStyle = isC ? '#33415577' : '#1a243655';
+        g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+        if (isC && bi === 0) {
+          g.fillStyle = '#64748b';
+          g.font = '8px ui-monospace, monospace';
+          g.fillText(midiName(m), 3, y - 2);
+        }
       }
-    }
+      if (bi > 0) {
+        g.strokeStyle = '#334155';
+        g.beginPath(); g.moveTo(0, y0); g.lineTo(w, y0); g.stroke();
+      }
+      g.fillStyle = src.color;
+      g.font = '9px ui-monospace, monospace';
+      g.fillText(src.label, 4, y0 + 10);
+    });
   }
 }
 
@@ -711,7 +813,7 @@ export function drawEnvelope(canvas, sources, sr = 44100) {
     const y0 = si * rowH;
     if (!src.analyser) continue;
     let st = _env.get(src);
-    if (!st) { st = { hist: [], prev: null, ema: 0, onsets: [] }; _env.set(src, st); }
+    if (!st) { st = { hist: [], fhist: [], prev: null, ema: 0, onsets: [] }; _env.set(src, st); }
     const tb = timeBuf(src.analyser);
     let s = 0;
     for (let i = 0; i < tb.length; i++) s += tb[i] * tb[i];
@@ -720,9 +822,9 @@ export function drawEnvelope(canvas, sources, sr = 44100) {
     while (st.hist.length && now - st.hist[0].t > ENV_WINDOW_MS) st.hist.shift();
 
     const b = freqBuf(src.analyser), hz = sr / src.analyser.fftSize;
+    let f = 0;
     if (st.prev) {
       const lo = Math.floor(FMIN / hz), hi = Math.min(b.length, Math.ceil(FMAX / hz));
-      let f = 0;
       for (let i = lo; i < hi; i++) { const d = b[i] - st.prev[i]; if (d > 0) f += d; }
       f /= (hi - lo);
       const last = st.onsets[st.onsets.length - 1];
@@ -730,6 +832,8 @@ export function drawEnvelope(canvas, sources, sr = 44100) {
           (last === undefined || now - last > ONSET_GAP_MS)) st.onsets.push(now);
       st.ema = st.ema * 0.9 + f * 0.1;
     }
+    st.fhist.push({ t: now, f, ema: st.ema });
+    while (st.fhist.length && now - st.fhist[0].t > ENV_WINDOW_MS) st.fhist.shift();
     st.prev = b.slice();
     while (st.onsets.length && now - st.onsets[0] > ENV_WINDOW_MS) st.onsets.shift();
 
@@ -746,6 +850,16 @@ export function drawEnvelope(canvas, sources, sr = 44100) {
     }
     g.lineTo(w, base);
     g.fill();
+    // spectral flux trace under the onset ticks: height = flux / its
+    // running mean, so each tick sits on the spike that produced it
+    g.strokeStyle = src.color + '66';
+    g.beginPath();
+    st.fhist.forEach((pt, i) => {
+      const x = w - (now - pt.t) / ENV_WINDOW_MS * w;
+      const v = pt.ema > 0 ? Math.min(1, pt.f / (pt.ema * ONSET_RATIO)) : 0;
+      i === 0 ? g.moveTo(x, base) : g.lineTo(x, base - v * ph);
+    });
+    g.stroke();
     g.strokeStyle = src.color;
     for (const t of st.onsets) {
       const x = w - (now - t) / ENV_WINDOW_MS * w;

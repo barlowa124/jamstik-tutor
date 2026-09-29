@@ -245,8 +245,16 @@ flux, so pick attacks read off the audio itself; the newest onset
 gets its attack time in ms, and a run of 4+ onsets yields a tempo
 estimate. The meters row also reports the ACF estimate with its
 confidence, zero-crossing rate, spectral flatness (tonal comb vs
-noise), crest factor, and spectral rolloff. The spectrogram runs the
-same log-frequency axis with note gridlines. The waveform marks the ACF
+noise), crest factor, and spectral rolloff, plus jitter and shimmer
+(cycle-to-cycle pitch deviation and RMS scatter, reported only for a
+sustained single pitch so chord hops aren't read as instability). The
+spectrogram runs the same log-frequency axis with note gridlines,
+drawn as one band per source. The heard-notes cell scrolls the
+spectral peaks found per frame as tracks on a midi grid, the
+polyphonic audio-derived counterpart to the note waterfall's MIDI
+lanes. The envelope cell draws the spectral-flux trace under its RMS
+area, so each onset tick sits on the flux spike that produced it.
+The waveform marks the ACF
 estimate's measured period as ticks along the top edge (`T 3.0ms`),
 so the estimator's answer is checkable against the raw repeat rate,
 and the periodicity cell draws the normalized autocorrelation curve
